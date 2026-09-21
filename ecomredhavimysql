@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEFAULT_PASS="metro"
+USERS=(magento opencart wordpress drupal)
+DBS=(magento opencart wordpress drupal)
+
+AP_CONF_DIR="/etc/apache2"
+WEAK_CONF="/etc/apache2/conf-available/zz-lab-weak.conf"
+WEAK_CONF_EN="/etc/apache2/conf-enabled/zz-lab-weak.conf"
+LAB_ROOT="/var/www/lab"
+LAB_PUBLIC="$LAB_ROOT/public"
+LAB_DIRLIST="$LAB_ROOT/dirlist"
+SITE_8080_AV="/etc/apache2/sites-available/lab-8080.conf"
+
+echo "[*] Ensuring packages..."
+sudo apt update
+sudo apt install -y apache2 mysql-server php libapache2-mod-php php-mysql curl
+
+echo "[*] Enable services..."
+sudo systemctl enable --now apache2 mysql
+
+echo "[*] Create lab web roots..."
+sudo mkdir -p "$LAB_PUBLIC" "$LAB_DIRLIST"
+sudo chown -R www-data:www-data "$LAB_ROOT"
+
+echo "[*] Add intentionally 'weak' Apache settings (safe training misconfig)..."
+sudo tee "$WEAK_CONF" >/dev/null <<'EOF'
+# INTENTIONAL WEAK SETTINGS FOR TRAINING (SAFE):
+# - leak version info
+ServerTokens Full
+ServerSignature On
+
+# remove common security headers if present elsewhere
+Header always unset X-Content-Type-Options
+Header always unset X-Frame-Options
+Header always unset Content-Security-Policy
+Header always unset Referrer-Policy
+Header always unset Permissions-Policy
+
+# expose /lab alias
+Alias /lab "/var/www/lab"
+
+<Directory "/var/www/lab/public">
+    Require all granted
+    Options FollowSymLinks
+    AllowOverride None
+</Directory>
+
+# directory listing ON for practice
+<Directory "/var/www/lab/dirlist">
+    Require all granted
+    Options Indexes FollowSymLinks
+    AllowOverride None
+</Directory>
+EOF
+
+# enable headers module so "unset" works; still weak because we unset
+sudo a2enmod headers >/dev/null || true
+sudo a2enconf zz-lab-weak >/dev/null || true
+
+echo "[*] Ensure Listen 8080..."
+sudo grep -qE '^\s*Listen\s+8080\s*$' /etc/apache2/ports.conf || echo "Listen 8080" | sudo tee -a /etc/apache2/ports.conf >/dev/null
+
+echo "[*] Create/enable 8080 vhost..."
+sudo tee "$SITE_8080_AV" >/dev/null <<'EOF'
+<VirtualHost *:8080>
+    ServerName lab.local
+    DocumentRoot /var/www/lab/public
+
+    ErrorLog ${APACHE_LOG_DIR}/lab-8080-error.log
+    CustomLog ${APACHE_LOG_DIR}/lab-8080-access.log combined
+
+    <Directory "/var/www/lab/public">
+        Require all granted
+        Options FollowSymLinks
+        AllowOverride None
+    </Directory>
+</VirtualHost>
+EOF
+sudo a2ensite lab-8080 >/dev/null || true
+
+echo "[*] Drop obvious practice files..."
+# phpinfo (intentionally bad)
+sudo tee "$LAB_PUBLIC/index.php" >/dev/null <<'PHP'
+<?php
+echo "Lab OK\n";
+phpinfo();
+PHP
+
+# "suspicious" but inert (does nothing)
+sudo tee "$LAB_PUBLIC/suspicious.php" >/dev/null <<'PHP'
+<?php
+/*
+  TRAINING STUB (INERT)
+  Looks suspicious, but executes nothing.
+  Students should find & remove it during hardening.
+*/
+$cmd = $_GET['cmd'] ?? '';
+echo "Training stub only. cmd ignored: " . htmlspecialchars($cmd, ENT_QUOTES) . "\n";
+PHP
+
+sudo tee "$LAB_DIRLIST/README.txt" >/dev/null <<'TXT'
+Directory listing is intentionally enabled here for practice hardening.
+TXT
+
+echo "[*] Reload Apache..."
+sudo apache2ctl -t
+sudo systemctl reload apache2
+
+echo "[*] MySQL: create DBs/users + set DEFAULT password (intentionally weak)..."
+SQL=""
+
+for name in "${DBS[@]}"; do
+  SQL+="CREATE DATABASE IF NOT EXISTS \`${name}\`;\n"
+done
+
+for u in "${USERS[@]}"; do
+  SQL+="CREATE USER IF NOT EXISTS '${u}'@'localhost' IDENTIFIED BY '${DEFAULT_PASS}';\n"
+  SQL+="ALTER USER '${u}'@'localhost' IDENTIFIED BY '${DEFAULT_PASS}';\n"
+  SQL+="GRANT ALL PRIVILEGES ON \`${u}\`.* TO '${u}'@'localhost';\n"
+done
+
+SQL+="FLUSH PRIVILEGES;\n"
+
+sudo mysql -e "$(printf "%b" "$SQL")"
+
+echo
+echo "[+] Lab intentionally weakened."
+echo "    Apache:"
+echo "      - http://<host>/lab/            (phpinfo exposed)"
+echo "      - http://<host>/lab/dirlist/    (Indexes ON)"
+echo "      - http://<host>:8080/           (extra vhost open)"
+echo "    MySQL users default password: $DEFAULT_PASS"
+echo "      - ${USERS[*]}"

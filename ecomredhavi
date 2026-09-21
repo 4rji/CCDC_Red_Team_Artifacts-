@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---- config ----
+DB_PASS_DEFAULT="metro"
+DBS=(magento opencart wordpress drupal)
+
+APACHE_LAB_ROOT="/var/www/lab"
+APACHE_VHOST_8080="/etc/apache2/sites-available/lab-8080.conf"
+APACHE_LAB_CONF="/etc/apache2/conf-available/lab-hardening-practice.conf"
+
+echo "[*] Installing packages..."
+sudo apt update
+sudo apt install -y apache2 mysql-server php libapache2-mod-php php-mysql
+
+echo "[*] Enabling services..."
+sudo systemctl enable --now apache2 mysql
+
+echo "[*] Creating Apache lab webroot..."
+sudo mkdir -p "$APACHE_LAB_ROOT/public" "$APACHE_LAB_ROOT/dirlist"
+sudo chown -R www-data:www-data "$APACHE_LAB_ROOT"
+
+echo "[*] Dropping lab PHP files (safe/inert)..."
+# Normal index
+sudo tee "$APACHE_LAB_ROOT/public/index.php" >/dev/null <<'PHP'
+<?php
+echo "Lab OK\n";
+phpinfo();
+PHP
+
+# "Suspicious" but inert stub (does NOT execute commands)
+sudo tee "$APACHE_LAB_ROOT/public/suspicious.php" >/dev/null <<'PHP'
+<?php
+/*
+  TRAINING STUB (INERT)
+  Looks like a webshell pattern but DOES NOT execute anything.
+  Goal: detect it in code review / scanning and remove it.
+*/
+$hint = $_GET['cmd'] ?? '';
+echo "Nothing to run. Training stub only.\n";
+echo "Received cmd param (ignored): " . htmlspecialchars($hint, ENT_QUOTES) . "\n";
+PHP
+
+# Directory listing practice folder
+sudo tee "$APACHE_LAB_ROOT/dirlist/README.txt" >/dev/null <<'TXT'
+This folder is intentionally configured with "Indexes" for practice.
+Harden Apache by disabling directory listing and tightening Options.
+TXT
+
+echo "[*] Configuring Apache 'weird-but-safe' settings for hardening practice..."
+# This config intentionally enables some things that students should tighten.
+sudo tee "$APACHE_LAB_CONF" >/dev/null <<EOF
+# INTENTIONAL PRACTICE MISCONFIG (safe):
+# - Exposes versions (ServerTokens Full, ServerSignature On)
+# - Enables directory listing for /lab/dirlist
+ServerTokens Full
+ServerSignature On
+
+Alias /lab "$APACHE_LAB_ROOT"
+
+<Directory "$APACHE_LAB_ROOT/public">
+    Require all granted
+    Options FollowSymLinks
+    AllowOverride None
+</Directory>
+
+<Directory "$APACHE_LAB_ROOT/dirlist">
+    Require all granted
+    Options Indexes FollowSymLinks
+    AllowOverride None
+</Directory>
+EOF
+
+echo "[*] Creating a second vhost on :8080 (practice surface)..."
+# Listen on 8080
+sudo sed -i 's/^Listen 80$/Listen 80\nListen 8080/' /etc/apache2/ports.conf || true
+
+sudo tee "$APACHE_VHOST_8080" >/dev/null <<EOF
+<VirtualHost *:8080>
+    ServerName lab.local
+    DocumentRoot $APACHE_LAB_ROOT/public
+
+    ErrorLog \${APACHE_LOG_DIR}/lab-8080-error.log
+    CustomLog \${APACHE_LOG_DIR}/lab-8080-access.log combined
+
+    <Directory "$APACHE_LAB_ROOT/public">
+        Require all granted
+        Options FollowSymLinks
+        AllowOverride None
+    </Directory>
+</VirtualHost>
+EOF
+
+sudo a2enconf lab-hardening-practice >/dev/null
+sudo a2ensite lab-8080 >/dev/null
+sudo a2enmod rewrite >/dev/null
+
+echo "[*] Reloading Apache..."
+sudo systemctl reload apache2
+
+echo "[*] Creating MySQL practice users/DBs..."
+# Create DB + user per app, least privilege to its own DB
+SQL=""
+for name in "${DBS[@]}"; do
+  SQL+="CREATE DATABASE IF NOT EXISTS \`${name}\`;\n"
+  SQL+="CREATE USER IF NOT EXISTS '${name}'@'localhost' IDENTIFIED BY '${DB_PASS_DEFAULT}';\n"
+  SQL+="GRANT ALL PRIVILEGES ON \`${name}\`.* TO '${name}'@'localhost';\n"
+done
+SQL+="FLUSH PRIVILEGES;\n"
+
+sudo mysql -e "$(printf "%b" "$SQL")"
+
+echo
+echo "[+] Done."
+echo "    Apache:"
+echo "      - http://<host>/lab/           (phpinfo + lab index)"
+echo "      - http://<host>/lab/dirlist/   (Indexes enabled on purpose)"
+echo "      - http://<host>:8080/          (extra vhost)"
+echo "    MySQL users (password: ${DB_PASS_DEFAULT}): ${DBS[*]}"
