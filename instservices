@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROGRAM_NAME="${0##*/}"
+MAIL_HOSTNAME="mail.ccdcteam.com"
+MAIL_DOMAIN="ccdcteam.com"
+ASSUME_YES=0
+
+usage() {
+  cat <<EOF
+Uso: sudo ./${PROGRAM_NAME} [opciones]
+
+Instala un laboratorio CCDC deliberadamente vulnerable en Ubuntu Server 24.04:
+  - Postfix: SMTP en el puerto 25
+  - Dovecot: IMAP en el puerto 143
+  - Apache: HTTP en el puerto 80 y HTTPS en el puerto 443
+  - PHP: pagina vulnerable en /ccdc-lab.php
+
+Opciones:
+  --mail-hostname NOMBRE   FQDN de correo (por defecto: mail.ccdcteam.com)
+  --mail-domain DOMINIO    Dominio de correo (por defecto: ccdcteam.com)
+  -y, --yes                Confirma las misconfiguraciones sin preguntar
+  -h, --help               Muestra esta ayuda
+
+ADVERTENCIA: crea permisos universales y vulnerabilidades intencionales.
+Usalo solamente en una maquina aislada y autorizada para CCDC.
+Si UFW ya esta activo, permite los puertos 25, 80, 143 y 443.
+El script no activa UFW automaticamente.
+EOF
+}
+
+die() {
+  echo "[ERROR] $*" >&2
+  exit 1
+}
+
+log() {
+  echo "[INFO] $*"
+}
+
+while (($#)); do
+  case "$1" in
+    --mail-hostname)
+      (($# >= 2)) || die "Falta el valor de --mail-hostname."
+      MAIL_HOSTNAME="$2"
+      shift 2
+      ;;
+    --mail-domain)
+      (($# >= 2)) || die "Falta el valor de --mail-domain."
+      MAIL_DOMAIN="$2"
+      shift 2
+      ;;
+    -y|--yes)
+      ASSUME_YES=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Opcion desconocida: $1. Usa --help para ver las opciones."
+      ;;
+  esac
+done
+
+if [[ $EUID -ne 0 ]]; then
+  command -v sudo >/dev/null 2>&1 || die "Se requieren privilegios root y sudo no esta instalado."
+  sudo_args=()
+  sudo_args+=(--mail-hostname "$MAIL_HOSTNAME")
+  sudo_args+=(--mail-domain "$MAIL_DOMAIN")
+  if ((ASSUME_YES)); then
+    sudo_args+=(--yes)
+  fi
+  exec sudo "$0" "${sudo_args[@]}"
+fi
+
+[[ -r /etc/os-release ]] || die "No se pudo identificar el sistema operativo."
+# shellcheck disable=SC1091
+source /etc/os-release
+[[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "24.04" ]] || \
+  die "Este instalador solo admite Ubuntu Server 24.04. Sistema detectado: ${PRETTY_NAME:-desconocido}."
+
+HOST_LABEL='[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+FQDN_REGEX="^${HOST_LABEL}(\\.${HOST_LABEL})+$"
+[[ "$MAIL_HOSTNAME" =~ $FQDN_REGEX ]] || \
+  die "Hostname de correo invalido: $MAIL_HOSTNAME. Usa un FQDN como mail.ejemplo.com."
+[[ "$MAIL_DOMAIN" =~ $FQDN_REGEX ]] || \
+  die "Dominio de correo invalido: $MAIL_DOMAIN. Usa un dominio como ejemplo.com."
+
+if ((!ASSUME_YES)); then
+  [[ -t 0 ]] || die "La confirmacion CCDC requiere una terminal. Usa --yes para automatizar."
+  echo "[ADVERTENCIA] Este script debilitara intencionalmente correo, Apache y PHP."
+  read -r -p "Escribe CCDC para continuar: " CCDC_CONFIRMATION
+  [[ "$CCDC_CONFIRMATION" == "CCDC" ]] || die "Confirmacion incorrecta; no se realizaron cambios."
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+
+log "Actualizando el indice de paquetes..."
+apt-get update
+
+log "Preparando la instalacion no interactiva de Postfix..."
+echo "postfix postfix/mailname string ${MAIL_DOMAIN}" | debconf-set-selections
+echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
+
+log "Instalando Postfix, Dovecot IMAP, Apache, PHP y certificados locales..."
+apt-get install -y postfix dovecot-core dovecot-imapd apache2 ssl-cert php libapache2-mod-php php-cli
+
+PHP_VERSION="$(php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')"
+PHP_CCDC_INI="/etc/php/${PHP_VERSION}/apache2/conf.d/99-ccdc-misconfig.ini"
+BACKUP_SUFFIX="instservices.$(date +%Y%m%d%H%M%S).bak"
+for config_file in \
+  /etc/mailname \
+  /etc/postfix/main.cf \
+  /etc/dovecot/conf.d/99-instservices.conf \
+  /etc/apache2/conf-available/zz-ccdc-misconfig.conf \
+  "$PHP_CCDC_INI" \
+  /var/www/html/ccdc-lab.php \
+  /var/www/html/uploads/team-notes.txt; do
+  if [[ -f "$config_file" ]]; then
+    cp -a "$config_file" "${config_file}.${BACKUP_SUFFIX}"
+    chmod 600 "${config_file}.${BACKUP_SUFFIX}"
+  fi
+done
+
+log "Configurando Postfix para entrega local en Maildir..."
+printf '%s\n' "$MAIL_DOMAIN" > /etc/mailname
+postconf -e "myhostname = ${MAIL_HOSTNAME}"
+postconf -e "mydomain = ${MAIL_DOMAIN}"
+postconf -e 'myorigin = $mydomain'
+postconf -e 'inet_interfaces = all'
+postconf -e 'inet_protocols = all'
+postconf -e 'mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain'
+postconf -e 'home_mailbox = Maildir/'
+postconf -e 'mailbox_command ='
+postconf -e 'mynetworks = 127.0.0.0/8 [::1]/128'
+postconf -e 'smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, defer_unauth_destination'
+postconf -e 'smtpd_tls_security_level = may'
+postconf -e 'smtp_tls_security_level = may'
+postconf -e 'smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem'
+postconf -e 'smtpd_tls_key_file = /etc/ssl/private/ssl-cert-snakeoil.key'
+
+log "Configurando Dovecot para IMAP/143 con autenticacion sin cifrar permitida..."
+cat > /etc/dovecot/conf.d/99-instservices.conf <<'EOF'
+# CCDC LAB: configuracion deliberadamente insegura administrada por instservices.
+protocols = imap
+listen = *, ::
+mail_location = maildir:~/Maildir
+
+# MISCONFIGURACION: TLS es opcional y se permiten credenciales sin cifrar.
+ssl = yes
+ssl_cert = </etc/ssl/certs/ssl-cert-snakeoil.pem
+ssl_key = </etc/ssl/private/ssl-cert-snakeoil.key
+disable_plaintext_auth = no
+auth_mechanisms = plain login
+auth_verbose = yes
+
+# Se usa IMAP con STARTTLS en 143; no se abre IMAPS/993.
+service imap-login {
+  inet_listener imaps {
+    port = 0
+  }
+}
+EOF
+
+log "Creando las misconfiguraciones de Apache para el laboratorio..."
+cat > /etc/apache2/conf-available/zz-ccdc-misconfig.conf <<'EOF'
+# CCDC LAB: configuracion deliberadamente insegura.
+ServerName ccdcteam.com
+ServerTokens Full
+ServerSignature On
+TraceEnable On
+
+<Directory /var/www/html>
+    Options +Indexes +FollowSymLinks
+    AllowOverride All
+    Require all granted
+</Directory>
+EOF
+
+mkdir -p "${PHP_CCDC_INI%/*}"
+cat > "$PHP_CCDC_INI" <<'EOF'
+; CCDC LAB: divulgacion de informacion deliberadamente habilitada.
+expose_php = On
+display_errors = On
+display_startup_errors = On
+log_errors = Off
+error_reporting = E_ALL
+EOF
+
+cat > /var/www/html/ccdc-lab.php <<'PHP'
+<?php
+// CCDC LAB - VULNERABLE A PROPOSITO:
+// La entrada se imprime sin htmlspecialchars(), causando XSS reflejado.
+$name = $_GET['name'] ?? 'Blue Team';
+$debug = isset($_GET['debug']);
+?>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>CCDC Team Portal</title>
+</head>
+<body>
+  <h1>CCDC Team Portal</h1>
+  <p>Bienvenido, <?= $name ?></p>
+  <form method="get">
+    <label>Nombre: <input name="name" value="<?= $name ?>"></label>
+    <button type="submit">Entrar</button>
+  </form>
+  <p><a href="?debug=1">Mostrar diagnostico</a></p>
+<?php if ($debug): ?>
+  <pre>PHP: <?= PHP_VERSION ?>
+Servidor: <?= $_SERVER['SERVER_SOFTWARE'] ?? 'desconocido' ?>
+DocumentRoot: <?= $_SERVER['DOCUMENT_ROOT'] ?? 'desconocido' ?></pre>
+<?php endif; ?>
+</body>
+</html>
+PHP
+
+mkdir -p /var/www/html/uploads
+printf '%s\n' 'CCDC shared uploads - directory listing intentionally enabled.' \
+  > /var/www/html/uploads/team-notes.txt
+
+log "Habilitando HTTP, HTTPS y la configuracion CCDC en Apache..."
+a2enmod ssl >/dev/null
+a2enmod autoindex >/dev/null
+a2enmod "php${PHP_VERSION}" >/dev/null
+a2ensite 000-default >/dev/null
+a2ensite default-ssl >/dev/null
+a2enconf zz-ccdc-misconfig >/dev/null
+
+log "Validando las configuraciones antes de reiniciar..."
+postfix check
+doveconf -n >/dev/null
+apache2ctl configtest
+php -l /var/www/html/ccdc-lab.php >/dev/null
+
+log "Habilitando y reiniciando los servicios..."
+systemctl enable postfix dovecot apache2 >/dev/null
+systemctl restart postfix dovecot apache2
+
+log "Aplicando permisos universales deliberadamente inseguros..."
+chmod 666 \
+  /etc/mailname \
+  /etc/postfix/main.cf \
+  /etc/dovecot/conf.d/99-instservices.conf \
+  /etc/apache2/conf-available/zz-ccdc-misconfig.conf \
+  "$PHP_CCDC_INI" \
+  /var/www/html/ccdc-lab.php \
+  /var/www/html/uploads/team-notes.txt
+chmod 777 /var/www/html /var/www/html/uploads
+
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
+  log "UFW esta activo; agregando reglas para los servicios instalados..."
+  ufw allow 25/tcp comment 'Postfix SMTP' >/dev/null
+  ufw allow 80/tcp comment 'Apache HTTP' >/dev/null
+  ufw allow 143/tcp comment 'Dovecot IMAP STARTTLS' >/dev/null
+  ufw allow 443/tcp comment 'Apache HTTPS' >/dev/null
+else
+  log "UFW no esta activo; no se modifico el firewall."
+fi
+
+log "Comprobando servicios y puertos..."
+FAILED=0
+for service_name in postfix dovecot apache2; do
+  if systemctl is-active --quiet "$service_name"; then
+    echo "[OK] ${service_name} esta activo."
+  else
+    echo "[ERROR] ${service_name} no esta activo." >&2
+    FAILED=1
+  fi
+done
+
+echo
+echo "Puertos esperados:"
+ss -ltnp | awk 'NR == 1 || $4 ~ /:(25|80|143|443)$/'
+
+if ((FAILED)); then
+  die "Uno o mas servicios no iniciaron. Revisa: journalctl -u postfix -u dovecot -u apache2"
+fi
+
+cat <<EOF
+
+[OK] Laboratorio CCDC deliberadamente vulnerable instalado.
+
+Correo:
+  Hostname: ${MAIL_HOSTNAME}
+  Dominio:  ${MAIL_DOMAIN}
+  SMTP:     puerto 25 (STARTTLS disponible)
+  IMAP:     puerto 143 (login sin TLS permitido intencionalmente)
+
+Web:
+  HTTP:     http://IP_DEL_SERVIDOR/
+  HTTPS:    https://IP_DEL_SERVIDOR/
+  Laboratorio vulnerable: http://IP_DEL_SERVIDOR/ccdc-lab.php
+  XSS de prueba:           /ccdc-lab.php?name=<script>alert(1)</script>
+  Listado de directorio:   /uploads/
+
+Misconfiguraciones: permisos 666/777, IMAP sin TLS obligatorio, versiones y
+listados visibles en Apache, errores PHP visibles y XSS reflejado.
+Los respaldos previos terminan en .${BACKUP_SUFFIX} y tienen permisos 600.
+NO expongas esta maquina a Internet. Esta configuracion es solo para CCDC.
+EOF
