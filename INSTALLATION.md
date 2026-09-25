@@ -1,6 +1,6 @@
-# CCDC Red Team Artifacts: Installing the Redhavi Checkers and Monitor
+# CCDC Red Team Artifacts: Installing the Checkers and Canary Monitor
 
-This guide documents how to download, compile, install, and run the Redhavi cleanup checkers on Linux and Windows, and how to start the canary monitor used during a CCDC practice session.
+This guide documents how to download, compile, install, and run the CCDC cleanup checkers on Linux and Windows, and how to start the canary monitor used during a practice session.
 
 The commands below install verification and monitoring tools. Scenario images must already be prepared by the exercise organizer. Section 9 documents one optional scheduled-task artifact for an isolated, authorized exercise; deployment of other web shells, unauthorized access keys, and persistence mechanisms is outside this guide.
 
@@ -74,6 +74,40 @@ If packaging is unnecessary, install the readable script instead. This replaces 
 ```bash
 sudo install -m 0755 redhavi-check /usr/local/bin/redhavi-check
 ```
+
+### Ubuntu 24.04 scenario with monitor check-ins
+
+The Ubuntu 24.04 profile adds a systemd oneshot service and timer that call the
+monitor every three minutes. It requires exactly Ubuntu `24.04`. Install the
+profile and its shared implementation together:
+
+```bash
+bash -n redhavi redhavi-ubuntu24 redhavi-check redhavi-check-ubuntu24
+sudo install -m 0755 redhavi redhavi-ubuntu24 \
+  redhavi-check redhavi-check-ubuntu24 /usr/local/bin/
+```
+
+Start `ccdc-canary-monitor` on the isolated instructor network first, then seed a
+disposable Ubuntu 24.04 VM using the monitor address reachable from that VM:
+
+```bash
+sudo CANARY_URL=http://MONITOR_IP:8081/checkin \
+  /usr/local/bin/redhavi-ubuntu24
+```
+
+The default interval is three minutes. Override it when needed with
+`CANARY_INTERVAL=N`. The seeder installs `redhavi-canary.service` and
+`redhavi-canary.timer`; the dedicated checker treats either unit, or an active
+or enabled timer, as remaining persistence:
+
+```bash
+sudo /usr/local/bin/redhavi-check-ubuntu24
+```
+
+This profile records scenario version `1` and runs `10` scored checks. The
+profile scripts source `redhavi` and `redhavi-check` from the same directory,
+so deploy each pair together. Do not expose the unauthenticated monitor outside
+the isolated exercise network.
 
 ## 4. Compile and install the Fedora checker
 
@@ -296,9 +330,9 @@ The monitor needs Python 3 and uses only the standard library. It does not need 
 On the Linux instructor machine, from the downloaded `binarios/redhavi` directory:
 
 ```bash
-sudo install -m 0755 redhavi-monitor /usr/local/bin/redhavi-monitor
+sudo install -m 0755 ccdc-canary-monitor /usr/local/bin/ccdc-canary-monitor
 mkdir -p "$HOME/ccdc-monitor"
-redhavi-monitor \
+ccdc-canary-monitor \
   --bind 127.0.0.1 \
   --port 8081 \
   --clean-threshold 240 \
@@ -313,7 +347,7 @@ To run the same monitor on Windows, from its source directory:
 
 ```powershell
 New-Item -ItemType Directory -Path "$env:USERPROFILE\ccdc-monitor" -Force | Out-Null
-py -3 .\redhavi-monitor --bind 127.0.0.1 --port 8081 --clean-threshold 240 --state "$env:USERPROFILE\ccdc-monitor\state.json"
+py -3 .\ccdc-canary-monitor --bind 127.0.0.1 --port 8081 --clean-threshold 240 --state "$env:USERPROFILE\ccdc-monitor\state.json"
 ```
 
 This Windows command requires Python 3 and the Python launcher. If your installation exposes only `python`, use that command after confirming `python --version` reports Python 3.

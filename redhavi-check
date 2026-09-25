@@ -9,6 +9,7 @@ PASSED_CHECKS=0
 FAILED_CHECKS=0
 ERROR_CHECKS=0
 OS="unknown"
+OS_VERSION_ID="unknown"
 
 GREEN=$'\033[32m'
 RED=$'\033[31m'
@@ -21,8 +22,13 @@ STATE_FILE="${REDHAVI_ROOT}/var/lib/redhavi/state"
 AUTH_FILE="${REDHAVI_ROOT}/root/.ssh/authorized_keys"
 WEB_ROOT_LOGICAL="/var/www/simple-php-website"
 LAB_SERVER="${LAB_SERVER:-10.5.8.11}"
-SCENARIO_VERSION=2
-UBUNTU_EXPECTED_CHECKS=9
+SCENARIO_NAME="${REDHAVI_SCENARIO_NAME:-redhavi}"
+SCENARIO_VERSION="${REDHAVI_SCENARIO_VERSION:-2}"
+UBUNTU_EXPECTED_CHECKS="${REDHAVI_EXPECTED_CHECKS:-9}"
+REDHAVI_CHECK_CANARY="${REDHAVI_CHECK_CANARY:-0}"
+REDHAVI_REQUIRED_VERSION_ID="${REDHAVI_REQUIRED_VERSION_ID:-}"
+CANARY_SERVICE="redhavi-canary.service"
+CANARY_TIMER="redhavi-canary.timer"
 ROOT_KEY_BLOB="${ROOT_KEY_BLOB:-AAAAC3NzaC1lZDI1NTE5AAAAILvd2Ok5Jk5HN1XFacHqgh+c2PhAr26Z8FZ130iaVDUB}"
 
 section() {
@@ -76,6 +82,11 @@ detect_os() {
     # shellcheck disable=SC1090
     . "$os_release"
     OS="${ID:-unknown}"
+    OS_VERSION_ID="${VERSION_ID:-unknown}"
+    if [ -n "$REDHAVI_REQUIRED_VERSION_ID" ] \
+        && { [ "$OS" != "ubuntu" ] || [ "$OS_VERSION_ID" != "$REDHAVI_REQUIRED_VERSION_ID" ]; }; then
+        fatal "This checker requires Ubuntu ${REDHAVI_REQUIRED_VERSION_ID}; detected ${PRETTY_NAME:-unknown}."
+    fi
 }
 
 require_command() {
@@ -88,6 +99,9 @@ require_commands() {
     for command_name in awk crontab getent grep id lsattr passwd; do
         require_command "$command_name"
     done
+    if [ "$REDHAVI_CHECK_CANARY" = "1" ]; then
+        require_command systemctl
+    fi
 
     case "$OS" in
         debian|ubuntu|kali)
@@ -131,7 +145,7 @@ validate_state_if_required() {
         fatal "The $STATE_FILE marker is missing; the scenario was not fully provisioned."
     fi
 
-    state_field_is 'scenario=redhavi' \
+    state_field_is "scenario=${SCENARIO_NAME}" \
         || fatal "The marker does not belong to the Redhavi scenario."
     state_field_is "version=${SCENARIO_VERSION}" \
         || fatal "Incompatible scenario version."
@@ -252,6 +266,31 @@ check_root_cron() {
         else
             check_error cron_root "could not read root's crontab: $output"
         fi
+    fi
+}
+
+check_canary_timer() {
+    local artifacts=()
+    local unit
+
+    section "Monitor canary persistence"
+    for unit in \
+        "${REDHAVI_ROOT}/etc/systemd/system/${CANARY_SERVICE}" \
+        "${REDHAVI_ROOT}/etc/systemd/system/${CANARY_TIMER}"; do
+        [ ! -e "$unit" ] || artifacts+=("$unit")
+    done
+
+    if systemctl is-active --quiet "$CANARY_TIMER" 2>/dev/null; then
+        artifacts+=("active:${CANARY_TIMER}")
+    fi
+    if systemctl is-enabled --quiet "$CANARY_TIMER" 2>/dev/null; then
+        artifacts+=("enabled:${CANARY_TIMER}")
+    fi
+
+    if [ "${#artifacts[@]}" -eq 0 ]; then
+        ok canary_timer "the monitor service and timer were removed"
+    else
+        bad canary_timer "monitor persistence remains: ${artifacts[*]}"
     fi
 }
 
@@ -435,7 +474,8 @@ run_package_checks() {
 
 expected_checks_for_os() {
     case "$OS" in
-        debian|ubuntu|kali) printf '9\n' ;;
+        ubuntu) printf '%s\n' "$UBUNTU_EXPECTED_CHECKS" ;;
+        debian|kali) printf '9\n' ;;
         centos|rhel|ol|fedora) printf '11\n' ;;
         arch) printf '8\n' ;;
         *) return 1 ;;
@@ -484,6 +524,9 @@ main() {
     check_user ccdc
     check_user splunk
     check_root_cron
+    if [ "$REDHAVI_CHECK_CANARY" = "1" ]; then
+        check_canary_timer
+    fi
 
     section "Root SSH key"
     check_ssh_key

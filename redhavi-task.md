@@ -34,6 +34,7 @@ Do not assume that every problem is in one place. Review users, services, schedu
 ### Scheduled Tasks
 
 - Root's crontab.
+- systemd timers and their associated oneshot services.
 - Files under system cron paths.
 - Jobs that download files from the network.
 - Recurring jobs that restore malicious changes.

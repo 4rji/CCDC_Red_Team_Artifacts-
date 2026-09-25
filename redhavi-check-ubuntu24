@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# Ubuntu 24.04 cleanup checker profile. Keep it beside redhavi-check.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+export REDHAVI_SCENARIO_NAME="redhavi-ubuntu24"
+export REDHAVI_SCENARIO_VERSION="1"
+export REDHAVI_EXPECTED_CHECKS="10"
+export REDHAVI_REQUIRED_VERSION_ID="24.04"
+export REDHAVI_CHECK_CANARY="1"
+
+# shellcheck source=redhavi-check
+. "${SCRIPT_DIR}/redhavi-check"
+main "$@"

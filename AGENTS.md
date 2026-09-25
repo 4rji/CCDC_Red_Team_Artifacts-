@@ -2,15 +2,15 @@
 
 ## Project Structure & Module Organization
 
-This repository is intentionally flat. Linux scenario seeders and checkers are executable Bash files in the root (`redhavi`, `redhavi-fedora`, and `redhavi-check*`). Windows equivalents use PowerShell (`redhaviwin.ps1`, `redhavi-checkWin.ps1`). `redhavi-monitor` is a standalone Python 3 dashboard. The `ecomredhavi*` scripts create web/database practice labs, while `redhavi-task.md`, `README.md`, and `INSTALLATION.md` contain student and operator documentation. `apollo1.exe` and `poseidon.bin` are zero-byte placeholders, not working payloads. Generated artifacts belong under `build/` and should not be committed unless explicitly required.
+This repository is intentionally flat. Linux scenario seeders and checkers are executable Bash files in the root (`redhavi`, `redhavi-ubuntu24`, `redhavi-fedora`, and `redhavi-check*`). Windows equivalents use PowerShell (`redhaviwin.ps1`, `redhavi-checkWin.ps1`). `ccdc-canary-monitor` is a standalone Python 3 dashboard. The `ecomredhavi*` scripts create web/database practice labs, while `redhavi-task.md`, `README.md`, and `INSTALLATION.md` contain student and operator documentation. `apollo1.exe` and `poseidon.bin` are zero-byte placeholders, not working payloads. Generated artifacts belong under `build/` and should not be committed unless explicitly required.
 
 ## Build, Test, and Development Commands
 
 There is no project-wide build system or dependency lockfile. Run focused checks from the repository root:
 
 ```bash
-bash -n redhavi redhavi-check redhavi-fedora redhavi-check-fedora
-python3 -m py_compile redhavi-monitor
+bash -n redhavi redhavi-ubuntu24 redhavi-check redhavi-check-ubuntu24 redhavi-fedora redhavi-check-fedora
+python3 -m py_compile ccdc-canary-monitor
 shellcheck redhavi redhavi-check redhavi-* ecomredhavi*  # when installed
 shc -f redhavi-check-shc -o build/redhavi-check
 ```
