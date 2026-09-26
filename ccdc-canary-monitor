@@ -26,7 +26,7 @@ The monitor listens on every interface by default. If the server has both IPs,
 it can receive check-ins from both subnets:
 
   Windows / subnet 101:
-    Invoke-RestMethod -Uri "http://172.16.101.73:8081/checkin"
+    Invoke-RestMethod -Uri "http://172.16.101.77:8081/checkin"
 
   Fedora / subnet 102:
     curl -fsS -o /dev/null "http://172.16.102.58:8081/checkin"

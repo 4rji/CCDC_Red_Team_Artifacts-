@@ -2,7 +2,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$SourcePath = (Join-Path $PSScriptRoot "redhavi-checkWin.ps1"),
+    [string]$SourcePath = "redhavi-checkWin.ps1",
     [string]$OutputPath = "Red_team_artifacts.exe",
     [switch]$InstallPs2Exe,
     [switch]$Force
