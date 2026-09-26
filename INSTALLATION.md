@@ -178,18 +178,17 @@ The first is the checker; the second packages it as an executable. The Apollo1 s
 From the downloaded `binarios\redhavi` directory:
 
 ```powershell
-.\redhavi-checkWin-ps2exe.ps1 -InstallPs2Exe
+.\redhavi-checkWin-ps2exe.ps1
 ```
 
-The wrapper installs PS2EXE for the current user if needed and produces `redhavi-checkWin.exe` next to the source. It builds an x64 console executable that requests administrator privileges and prints the output's SHA-256 hash.
+The wrapper installs PS2EXE for the current user if needed and produces `Red_team_artifacts.exe` in the current directory. It builds an x64 console executable that requests administrator privileges and prints the output's SHA-256 hash.
 
 For an explicit output directory:
 
 ```powershell
 .\redhavi-checkWin-ps2exe.ps1 `
     -SourcePath .\redhavi-checkWin.ps1 `
-    -OutputPath .\build\redhavi-checkWin.exe `
-    -InstallPs2Exe
+    -OutputPath .\build\Red_team_artifacts.exe
 ```
 
 If that exact output already exists and you intend to replace it, repeat the command with `-Force`.
@@ -204,14 +203,14 @@ Transfer the executable to the exercise VM using your normal file transfer metho
 
 ```powershell
 New-Item -ItemType Directory -Path 'C:\CCDC\Tools' -Force | Out-Null
-Copy-Item .\redhavi-checkWin.exe 'C:\CCDC\Tools\redhavi-checkWin.exe'
-Get-FileHash 'C:\CCDC\Tools\redhavi-checkWin.exe' -Algorithm SHA256
-& 'C:\CCDC\Tools\redhavi-checkWin.exe'
+Copy-Item .\Red_team_artifacts.exe 'C:\CCDC\Tools\Red_team_artifacts.exe'
+Get-FileHash 'C:\CCDC\Tools\Red_team_artifacts.exe' -Algorithm SHA256
+& 'C:\CCDC\Tools\Red_team_artifacts.exe'
 $checkerExit = $LASTEXITCODE
 Write-Host "Checker exit code: $checkerExit"
 ```
 
-Compare the hash with the build machine's output. If you built into `build`, the file to transfer is `build\redhavi-checkWin.exe`.
+Compare the hash with the build machine's output. If you built into `build`, the file to transfer is `build\Red_team_artifacts.exe`.
 
 For the script version, run this from the source directory in an elevated Windows PowerShell terminal:
 
@@ -404,7 +403,7 @@ The Linux and Windows checkers explicitly report infrastructure errors. The Fedo
 | Compiled checker does not run | Rebuild on the destination OS and architecture, confirm `/bin/bash` exists, or use the script version. |
 | Checker requires root or administrator | Use `sudo` on Linux or an elevated 64-bit Windows PowerShell terminal. |
 | Missing, incomplete, or incompatible state | Confirm the organizer supplied the correct prepared image and matching checker revision. |
-| PS2EXE module missing | Run the build wrapper with `-InstallPs2Exe` where module installation is approved. |
+| PS2EXE module missing | The wrapper installs it automatically for the current user; verify that PowerShell Gallery access and module installation are allowed. |
 | Windows build output already exists | Choose a new output path or use `-Force` to intentionally replace that file. |
 | Remote monitor connection fails | Confirm the lab-interface bind address, route, firewall, and TCP port `8081`. |
 | Dashboard is blank or does not refresh | Query `/api/status` directly and inspect the browser console; do not infer a clean host from an empty dashboard. |

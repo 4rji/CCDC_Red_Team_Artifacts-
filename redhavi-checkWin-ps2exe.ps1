@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [string]$SourcePath = (Join-Path $PSScriptRoot "redhavi-checkWin.ps1"),
-    [string]$OutputPath = (Join-Path $PSScriptRoot "redhavi-checkWin.exe"),
+    [string]$OutputPath = "Red_team_artifacts.exe",
     [switch]$InstallPs2Exe,
     [switch]$Force
 )
@@ -35,9 +35,6 @@ function Find-Ps2ExeCompiler {
         return Get-Command Invoke-ps2exe -ErrorAction Stop
     }
 
-    if (-not $InstallPs2Exe) {
-        throw "PS2EXE is not installed. Run again with -InstallPs2Exe or install it with: Install-Module ps2exe -Scope CurrentUser"
-    }
     if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
         throw "Install-Module is unavailable. Install PowerShellGet and then install the ps2exe module."
     }

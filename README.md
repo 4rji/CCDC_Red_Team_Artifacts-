@@ -171,8 +171,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 Para compilar el checker como EXE:
 
 ```powershell
-.\redhavi-checkWin-ps2exe.ps1 -InstallPs2Exe
-.\redhavi-checkWin.exe
+.\redhavi-checkWin-ps2exe.ps1
+.\Red_team_artifacts.exe
 ```
 
 Usa `-Force` en el compilador solamente cuando quieras reemplazar
