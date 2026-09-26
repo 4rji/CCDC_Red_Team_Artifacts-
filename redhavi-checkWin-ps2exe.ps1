@@ -1,97 +1,32 @@
 #Requires -Version 5.1
 
-[CmdletBinding()]
 param(
-    [string]$SourcePath = "redhavi-checkWin.ps1",
-    [string]$OutputPath = "Red_team_artifacts.exe",
-    [switch]$InstallPs2Exe,
-    [switch]$Force
+    [string]$OutputPath = ".\Red_team_artifacts.exe"
 )
 
-Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-function Resolve-FullPath {
-    param([Parameter(Mandatory)][string]$Path)
+$sourceUrl = "https://raw.githubusercontent.com/4rji/CCDC_Red_Team_Artifacts-/3fe27c94aae17031da4cac9a24d2b2e95a5cd925/redhavi-checkWin.ps1"
+$expectedHash = "F9203222A95D37B53BEE89EFE25CF88C90AF9F5B0581CFC762774255C798B327"
+$tempSource = Join-Path ([IO.Path]::GetTempPath()) "redhavi-checkWin.ps1"
 
-    if ([IO.Path]::IsPathRooted($Path)) {
-        return [IO.Path]::GetFullPath($Path)
-    }
-    return [IO.Path]::GetFullPath((Join-Path (Get-Location).Path $Path))
-}
+Install-PackageProvider NuGet -Force | Out-Null
+Install-Module ps2exe -Scope CurrentUser -Force -AllowClobber
+Import-Module ps2exe
 
-function Find-Ps2ExeCompiler {
-    $command = Get-Command Invoke-ps2exe -ErrorAction SilentlyContinue
-    if ($command) {
-        return $command
-    }
+try {
+    Invoke-WebRequest -Uri $sourceUrl -OutFile $tempSource -UseBasicParsing
 
-    $module = Get-Module -ListAvailable -Name ps2exe |
-        Sort-Object Version -Descending |
-        Select-Object -First 1
-    if ($module) {
-        Import-Module $module.Path -Force
-        return Get-Command Invoke-ps2exe -ErrorAction Stop
+    if ((Get-FileHash -LiteralPath $tempSource -Algorithm SHA256).Hash -ne $expectedHash) {
+        throw "The downloaded checker failed its SHA-256 integrity check."
     }
 
-    if (-not (Get-Command Install-Module -ErrorAction SilentlyContinue)) {
-        throw "Install-Module is unavailable. Install PowerShellGet and then install the ps2exe module."
-    }
-
-    Write-Host "Installing PS2EXE for the current user..." -ForegroundColor Cyan
-    Install-Module ps2exe -Scope CurrentUser -Force -AllowClobber -Confirm:$false
-    Import-Module ps2exe -Force
-    return Get-Command Invoke-ps2exe -ErrorAction Stop
+    Invoke-ps2exe `
+        -inputFile $tempSource `
+        -outputFile $OutputPath `
+        -x64 `
+        -requireAdmin
+} finally {
+    Remove-Item -LiteralPath $tempSource -Force -ErrorAction SilentlyContinue
 }
-
-$source = Resolve-FullPath $SourcePath
-$output = Resolve-FullPath $OutputPath
-if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-    throw "Checker source was not found: $source"
-}
-if ([IO.Path]::GetExtension($output) -ne ".exe") {
-    throw "OutputPath must use the .exe extension."
-}
-if (Test-Path -LiteralPath $output) {
-    if (-not $Force) {
-        throw "Output already exists: $output. Use -Force to replace it."
-    }
-    Remove-Item -LiteralPath $output -Force
-}
-
-$outputDirectory = Split-Path -Parent $output
-if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
-    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-}
-
-$compiler = Find-Ps2ExeCompiler
-$compileOptions = @{
-    inputFile    = $source
-    outputFile   = $output
-    x64          = $true
-    requireAdmin = $true
-    title        = "Redhavi Windows Cleanup Verification"
-    description  = "Scores cleanup of the Redhavi Windows CCDC lab"
-    product      = "Redhavi Windows Checker"
-    company      = "4rji"
-    version      = "1.0.0.0"
-}
-if ($compiler.Parameters.ContainsKey("supportOS")) {
-    $compileOptions.supportOS = $true
-}
-if ($compiler.Parameters.ContainsKey("longPaths")) {
-    $compileOptions.longPaths = $true
-}
-
-Write-Warning "PS2EXE packages PowerShell source and is not cryptographic source protection."
-Write-Host "Compiling $source" -ForegroundColor Cyan
-& $compiler @compileOptions
-
-if (-not (Test-Path -LiteralPath $output -PathType Leaf)) {
-    throw "PS2EXE completed without creating the expected output: $output"
-}
-
-$hash = Get-FileHash -LiteralPath $output -Algorithm SHA256
-Write-Host "Created: $output" -ForegroundColor Green
-Write-Host "SHA256:  $($hash.Hash)"
