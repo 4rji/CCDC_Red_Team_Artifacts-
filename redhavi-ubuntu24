@@ -10,6 +10,7 @@ export REDHAVI_SCENARIO_VERSION="1"
 export REDHAVI_EXPECTED_CHECKS="10"
 export REDHAVI_REQUIRED_VERSION_ID="24.04"
 export REDHAVI_ENABLE_CANARY="1"
+export REDHAVI_INSTALL_TFTP="0"
 
 # shellcheck source=redhavi
 . "${SCRIPT_DIR}/redhavi"

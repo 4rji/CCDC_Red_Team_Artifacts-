@@ -13,6 +13,7 @@ CANARY_INTERVAL="${CANARY_INTERVAL:-3}"
 CANARY_SERVICE="redhavi-canary.service"
 CANARY_TIMER="redhavi-canary.timer"
 REDHAVI_ENABLE_CANARY="${REDHAVI_ENABLE_CANARY:-0}"
+REDHAVI_INSTALL_TFTP="${REDHAVI_INSTALL_TFTP:-1}"
 REDHAVI_REQUIRED_VERSION_ID="${REDHAVI_REQUIRED_VERSION_ID:-}"
 
 # These values pin the expected artifacts. If a URL changes, provide the
@@ -45,8 +46,11 @@ PACKAGES=(
     openssh-client
     telnet
     ftp
-    tftp
 )
+
+if [ "$REDHAVI_INSTALL_TFTP" = "1" ]; then
+    PACKAGES+=(tftp)
+fi
 
 CURRENT_STEP="startup"
 STATE_STARTED=0
@@ -524,7 +528,9 @@ verify_seeded() {
 
     verify_expect "telnet package installed" package_installed telnet
     verify_expect "ftp package installed" package_installed ftp
-    verify_expect "tftp package installed" package_installed tftp
+    if [ "$REDHAVI_INSTALL_TFTP" = "1" ]; then
+        verify_expect "tftp package installed" package_installed tftp
+    fi
     verify_expect "interactive ccdc user in sudo" user_is_seeded ccdc
     verify_expect "interactive splunk user in sudo" user_is_seeded splunk
     verify_expect "root cron job seeded" cron_is_seeded
