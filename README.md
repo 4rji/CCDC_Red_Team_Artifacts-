@@ -236,12 +236,18 @@ Los permisos y las vulnerabilidades intencionales del laboratorio se mantienen.
 ### Leer correo desde CLI
 
 Ejecuta los comandos de lectura desde el servidor o desde otro equipo de la
-red del laboratorio. Sustituye `IP_DEL_SERVIDOR` por la IP de la VM; si estás
-en el propio servidor, puedes usar `127.0.0.1`. En Ubuntu, instala el cliente
-si hace falta:
+red del laboratorio. En Ubuntu, instala el cliente si hace falta:
 
 ```bash
 sudo apt-get install -y curl
+```
+
+Define la variable `$ipphpserver` con la IP de la VM en la misma terminal donde
+ejecutarás las pruebas, así puedes copiar los comandos tal cual. Si estás en el
+propio servidor, usa `127.0.0.1`:
+
+```bash
+export ipphpserver="192.168.1.100"  # Reemplaza con la IP real del servidor de correo
 ```
 
 Usa una de las 12 cuentas, por ejemplo `ana.garcia`, y consulta su contraseña
@@ -253,14 +259,14 @@ Estos ejemplos usan IMAP/143 sin TLS, tal como permite el laboratorio.
 
 ```bash
 curl --silent --show-error --user ana.garcia \
-  --url 'imap://IP_DEL_SERVIDOR:143/'
+  --url "imap://$ipphpserver:143/"
 ```
 
 **2. Buscar los identificadores (UID) de los mensajes en INBOX:**
 
 ```bash
 curl --silent --show-error --user ana.garcia \
-  --url 'imap://IP_DEL_SERVIDOR:143/INBOX' \
+  --url "imap://$ipphpserver:143/INBOX" \
   --request 'UID SEARCH ALL'
 ```
 
@@ -271,11 +277,11 @@ Si devuelve `* SEARCH` sin números, el buzón está vacío.
 
 ```bash
 curl --silent --show-error --user ana.garcia \
-  --url 'imap://IP_DEL_SERVIDOR:143/INBOX/;UID=1'
+  --url "imap://$ipphpserver:143/INBOX/;UID=1"
 ```
 
 Sustituye `1` por uno de los UID que devolvió la búsqueda; los UID no tienen
-por qué ser consecutivos. Mantén las comillas de la URL, porque contiene `;`.
+por qué ser consecutivos. Mantén las comillas dobles de la URL: protegen el `;` y permiten que `$ipphpserver` se sustituya.
 La [documentación de curl sobre IMAP](https://curl.se/docs/url-syntax.html#imap)
 describe estas búsquedas y la lectura por UID.
 
@@ -296,6 +302,46 @@ printf '%s\n' \
 
 Después repite la búsqueda y lectura de INBOX. Postfix entrega el mensaje
 al Maildir de Ana y Dovecot permite leerlo por IMAP.
+
+**5. Enviar un correo con curl por SMTP (desde cualquier equipo del laboratorio):**
+
+El paso 4 usa `sendmail` en el propio servidor. Desde otro equipo de la red
+puedes enviar con curl al puerto 25 sin autenticación, porque el dominio local
+está en `mydestination` de Postfix. Si usaste otro `--mail-domain`, cambia el
+dominio en las dos direcciones:
+
+```bash
+printf '%s\r\n' \
+  'From: carlos.lopez@ccdcteam.com' \
+  'To: ana.garcia@ccdcteam.com' \
+  'Subject: Prueba con curl' \
+  '' \
+  'Mensaje enviado con curl desde un equipo del laboratorio.' |
+  curl --silent --show-error \
+    --url "smtp://$ipphpserver:25" \
+    --mail-from carlos.lopez@ccdcteam.com \
+    --mail-rcpt ana.garcia@ccdcteam.com \
+    --upload-file -
+```
+
+Después vuelve a ejecutar la búsqueda del paso 2 para ver el nuevo UID.
+
+**6. Borrar un mensaje de prueba (limpieza del buzón):**
+
+Marca el mensaje con la bandera `\Deleted` y luego ejecuta `EXPUNGE`. Sustituye
+`2` por el UID que quieras eliminar:
+
+```bash
+curl --silent --show-error --user ana.garcia \
+  --url "imap://$ipphpserver:143/INBOX" \
+  --request 'UID STORE 2 +FLAGS.SILENT \Deleted'
+
+curl --silent --show-error --user ana.garcia \
+  --url "imap://$ipphpserver:143/INBOX" \
+  --request 'EXPUNGE'
+```
+
+Vuelve a listar con `UID SEARCH ALL` para confirmar que el UID ya no aparece.
 
 ## Artefactos opcionales Apollo y Poseidon
 

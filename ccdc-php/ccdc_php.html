@@ -268,25 +268,28 @@ sudo ./instservices \
 </code></pre></div>
 <p>Para leer correo, conecta un cliente IMAP al servidor en el puerto <code>143</code>, usando el nombre de usuario sin dominio (por ejemplo, <code>ana.garcia</code>) y su contraseña. La dirección de correo es <code>usuario@DOMINIO</code>, con el dominio seleccionado mediante <code>--mail-domain</code>. Dovecot ya forma parte de la instalación. Al repetir el instalador, se conservan las cuentas, contraseñas y mensajes existentes. El archivo registra solo las contraseñas iniciales de las cuentas creadas por el instalador. Los permisos y las vulnerabilidades intencionales del laboratorio se mantienen.</p>
 <h3 id="leer-correo-desde-cli">Leer correo desde CLI</h3>
-<p>Ejecuta los comandos de lectura desde el servidor o desde otro equipo de la red del laboratorio. Sustituye <code>IP_DEL_SERVIDOR</code> por la IP de la VM; si estás en el propio servidor, puedes usar <code>127.0.0.1</code>. En Ubuntu, instala el cliente si hace falta:</p>
+<p>Ejecuta los comandos de lectura desde el servidor o desde otro equipo de la red del laboratorio. En Ubuntu, instala el cliente si hace falta:</p>
 <div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo apt-get install -y curl
+</code></pre></div>
+<p>Define la variable <code>$ipphpserver</code> con la IP de la VM en la misma terminal donde ejecutarás las pruebas, así puedes copiar los comandos tal cual. Si estás en el propio servidor, usa <code>127.0.0.1</code> como IP del servidor:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">export ipphpserver=&quot;192.168.1.100&quot;  # Reemplaza con la IP real del servidor de correo
 </code></pre></div>
 <p>Usa una de las 12 cuentas, por ejemplo <code>ana.garcia</code>, y consulta su contraseña inicial en <code>/root/instservices-mail-users.tsv</code> en el servidor. Al indicar solo el usuario con <code>--user</code>, curl solicita la contraseña en la terminal. Estos ejemplos usan IMAP/143 sin TLS, tal como permite el laboratorio.</p>
 <p><strong>1. Listar los buzones disponibles:</strong></p>
 <div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">curl --silent --show-error --user ana.garcia \
-  --url &#x27;imap://IP_DEL_SERVIDOR:143/&#x27;
+  --url &quot;imap://$ipphpserver:143/&quot;
 </code></pre></div>
 <p><strong>2. Buscar los identificadores (UID) de los mensajes en INBOX:</strong></p>
 <div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">curl --silent --show-error --user ana.garcia \
-  --url &#x27;imap://IP_DEL_SERVIDOR:143/INBOX&#x27; \
+  --url &quot;imap://$ipphpserver:143/INBOX&quot; \
   --request &#x27;UID SEARCH ALL&#x27;
 </code></pre></div>
 <p>Una respuesta como <code>* SEARCH 1 2</code> indica que existen los UID <code>1</code> y <code>2</code>. Si devuelve <code>* SEARCH</code> sin números, el buzón está vacío.</p>
 <p><strong>3. Leer un mensaje completo, incluidos encabezados y cuerpo:</strong></p>
 <div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">curl --silent --show-error --user ana.garcia \
-  --url &#x27;imap://IP_DEL_SERVIDOR:143/INBOX/;UID=1&#x27;
+  --url &quot;imap://$ipphpserver:143/INBOX/;UID=1&quot;
 </code></pre></div>
-<p>Sustituye <code>1</code> por uno de los UID que devolvió la búsqueda; los UID no tienen por qué ser consecutivos. Mantén las comillas de la URL, porque contiene <code>;</code>. La <a href="https://curl.se/docs/url-syntax.html#imap">documentación de curl sobre IMAP</a> describe estas búsquedas y la lectura por UID.</p>
+<p>Sustituye <code>1</code> por uno de los UID que devolvió la búsqueda; los UID no tienen por qué ser consecutivos. Mantén las comillas dobles de la URL: protegen el <code>;</code> y permiten que <code>$ipphpserver</code> se sustituya. La <a href="https://curl.se/docs/url-syntax.html#imap">documentación de curl sobre IMAP</a> describe estas búsquedas y la lectura por UID.</p>
 <p><strong>4. Enviar un correo de prueba local para tener algo que leer:</strong></p>
 <p>Ejecuta esto en el servidor de correo. Si usaste otro <code>--mail-domain</code>, cambia <code>ccdcteam.com</code> en las dos direcciones:</p>
 <div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">printf &#x27;%s\n&#x27; \
@@ -298,6 +301,32 @@ sudo ./instservices \
   sudo -u carlos.lopez /usr/sbin/sendmail -i -t
 </code></pre></div>
 <p>Después repite la búsqueda y lectura de INBOX. Postfix entrega el mensaje al Maildir de Ana y Dovecot permite leerlo por IMAP.</p>
+<p><strong>5. Enviar un correo con curl por SMTP (desde cualquier equipo del laboratorio):</strong></p>
+<p>El paso 4 usa <code>sendmail</code> en el propio servidor. Desde otro equipo de la red puedes enviar con curl al puerto 25 sin autenticación, porque el dominio local está en <code>mydestination</code> de Postfix. Si usaste otro <code>--mail-domain</code>, cambia el dominio en las dos direcciones:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">printf &#x27;%s\r\n&#x27; \
+  &#x27;From: carlos.lopez@ccdcteam.com&#x27; \
+  &#x27;To: ana.garcia@ccdcteam.com&#x27; \
+  &#x27;Subject: Prueba con curl&#x27; \
+  &#x27;&#x27; \
+  &#x27;Mensaje enviado con curl desde un equipo del laboratorio.&#x27; |
+  curl --silent --show-error \
+    --url &quot;smtp://$ipphpserver:25&quot; \
+    --mail-from carlos.lopez@ccdcteam.com \
+    --mail-rcpt ana.garcia@ccdcteam.com \
+    --upload-file -
+</code></pre></div>
+<p>Después vuelve a ejecutar la búsqueda del paso 2 para ver el nuevo UID.</p>
+<p><strong>6. Borrar un mensaje de prueba (limpieza del buzón):</strong></p>
+<p>Marca el mensaje con la bandera <code>\Deleted</code> y luego ejecuta <code>EXPUNGE</code>. Sustituye <code>2</code> por el UID que quieras eliminar:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">curl --silent --show-error --user ana.garcia \
+  --url &quot;imap://$ipphpserver:143/INBOX&quot; \
+  --request &#x27;UID STORE 2 +FLAGS.SILENT \Deleted&#x27;
+
+curl --silent --show-error --user ana.garcia \
+  --url &quot;imap://$ipphpserver:143/INBOX&quot; \
+  --request &#x27;EXPUNGE&#x27;
+</code></pre></div>
+<p>Vuelve a listar con <code>UID SEARCH ALL</code> para confirmar que el UID ya no aparece.</p>
 </section>
 <section class="doc-section" aria-labelledby="artefactos-opcionales-apollo-y-poseidon"><header class="section-heading"><span class="section-number" aria-hidden="true">09</span><h2 id="artefactos-opcionales-apollo-y-poseidon">Artefactos opcionales Apollo y Poseidon</h2></header>
 <p>Estos scripts requieren un payload recién generado para un ejercicio autorizado. Los placeholders incluidos no funcionan. Usa siempre un SHA-256 conocido y un servidor aislado.</p>
