@@ -69,6 +69,18 @@ evaluate_lab() {
     printf " %-28s | %-14s | %-18s | %-8s\n" "MODULE / CHALLENGE" "SLA STATUS" "SECURITY STATUS" "SCORE"
     echo -e "------------------------------------------------------------------------------"
 
+    # Require the remote HTTP service to respond and identify itself as Apache.
+    if ! curl -s --max-time "$TIMEOUT" -D "$TMP_TEST_DIR/apache_headers.txt" \
+        -o /dev/null "http://$ipphpserver/" \
+        || ! grep -qiE '^Server:[[:space:]]*Apache([/[:space:]]|$)' "$TMP_TEST_DIR/apache_headers.txt"; then
+        printf " %-28s | ${RED}%-14s${RESET} | ${YELLOW}%-18s${RESET} | %-8s\n" "Apache2 HTTP Service" "NOT DETECTED" "NOT EVALUATED" "0 / 100"
+        echo -e "------------------------------------------------------------------------------"
+        echo -e " ${RED}[!] Apache did not respond or was not identified in the Server header. Scoring disabled.${RESET}"
+        echo -e " ${BOLD}TOTAL TEAM SCORE:${RESET} ${RED}${BOLD}0 / ${max_score} POINTS${RESET}"
+        echo -e "${CYAN}==============================================================================${RESET}"
+        return 1
+    fi
+
     # --------------------------------------------------------------------------
     # 1. Main Portal (ccdc-lab.php) - 15 pts (Requires SLA 200 + Not Defaced + No 777)
     # --------------------------------------------------------------------------
