@@ -1,0 +1,54 @@
+/* Shared dark theme for the CCDC documentation pages. */
+:root {
+    color-scheme: dark;
+    --ink: #e1e9f5;
+    --muted: #a8bad0;
+    --accent: #ffad85;
+    --paper: #0b1220;
+    --line: #2a3b52;
+    --sidebar: #0d1728;
+}
+body { background: var(--paper); color: var(--ink); }
+a:hover { color: #ffd1b9; }
+.skip-link { color: #e1e9f5; background: #22344d; }
+.sidebar { border-right: 1px solid var(--line); }
+.brand-mark { background: #9d391f; }
+.doc-section { background: #121e30; border-color: var(--line); }
+.section-number { color: #b0c1d8; border-color: #3c506b; background: #18283d; }
+h3 { border-color: var(--line); }
+:not(pre) > code { color: #c8ddf7; background: #22334a; }
+.caution { color: #ead2be; background: #2c231f; border-left-color: #e6a06b; }
+.caution-title { color: #ffc296; }
+.hero-links a, .page-tabs a { background: #17253a; color: #c7d7ec; border-color: #3a4d67; }
+.hero-links a:first-child, .page-tabs a[aria-current="page"] {
+    color: #ffe2cf; background: #4c3027; border-color: #ba7a56;
+}
+.hero-links a:hover, .page-tabs a:hover { background: #283b54; border-color: #d59872; color: #fff; }
+.code-block { background: #091422; border: 1px solid #2a3c53; }
+.code-toolbar { background: #19283d; border-bottom-color: #344b66; }
+pre { color: #d7e6f7; }
+th { color: #bfd0e8; background: #1e3048; }
+td { border-color: var(--line); }
+tbody tr:nth-child(even) { background: #152338; }
+li::marker { color: #e9ae8d; }
+.page-footer, .page-footer a { color: #a8bad0; }
+.language-switch { display: flex; justify-content: flex-end; gap: 6px; margin: 0 0 18px; }
+.language-switch button {
+    font: 600 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 7px 13px; border: 1px solid #3a4d67; border-radius: 7px;
+    background: #17253a; color: #c7d7ec; cursor: pointer; min-height: 36px;
+}
+.language-switch button:hover { background: #283b54; color: #fff; }
+.language-switch button[aria-pressed="true"] { color: #ffe2cf; background: #4c3027; border-color: #ba7a56; }
+@media (max-width: 760px) {
+    .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+    .language-switch { justify-content: flex-start; }
+    .page-tabs a { flex: 1 1 auto; text-align: center; }
+}
+@media print {
+    :root { color-scheme: light; --ink: #111; --muted: #333; --line: #bbb; }
+    body, .doc-section, tbody tr:nth-child(even) { color: #111; background: white; }
+    .language-switch { display: none; }
+    .caution, .code-block, .code-toolbar, th, :not(pre) > code { background: #f2f2f2; color: #111; }
+    pre, .caution-title, .page-footer, .page-footer a, .section-number { color: #111; }
+}

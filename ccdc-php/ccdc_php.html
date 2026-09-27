@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="es" data-doc-page="ccdc_php.html">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Guía por secciones de los laboratorios CCDC: instalación, checkers, monitor y acceso al correo por CLI.">
+  <meta name="readme-sha256" content="95886fce6b340b850ffd610be415cd75fbc0f40f2a247ef9e1a998babd8aaf0b">
+  <meta name="color-scheme" content="dark">
+  <title>CCDC · Guía del laboratorio</title>
+  <style>
+    :root { --ink: #17283d; --muted: #536579; --accent: #b43d20; --paper: #f3f5f8; --line: #dce3ec; --sidebar: #132136; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 28px; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    a { color: var(--accent); text-underline-offset: 4px; }
+    a:hover { color: #762612; }
+    button, summary, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid #e89c52; outline-offset: 4px; }
+    .skip-link { position: fixed; top: 12px; left: 12px; z-index: 10; transform: translateY(-180%); background: white; padding: 8px 16px; border-radius: 6px; }
+    .skip-link:focus { transform: translateY(0); }
+    .layout { display: grid; grid-template-columns: 282px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 26px; padding: 32px 22px 24px; background: var(--sidebar); color: #d3deed; }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; text-decoration: none; color: white; }
+    .brand:hover { color: white; }
+    .brand-mark { display: grid; place-items: center; flex: 0 0 42px; height: 42px; color: #fff; background: #c94c2c; border-radius: 10px; font: 700 20px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .brand strong { display: block; font-size: 20px; line-height: 1.25; letter-spacing: .06em; }
+    .brand small { display: block; color: #a8bad1; font-size: 12px; line-height: 1.6; }
+    .mail-shortcut { margin: 0 6px; padding: 11px 14px; border: 1px solid #536174; border-radius: 8px; text-decoration: none; color: #fff; font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; }
+    .mail-shortcut:hover { background: #233850; color: white; border-color: #8294ab; }
+    .toc { min-height: 0; flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #55647a transparent; }
+    .toc summary { color: #a8bad1; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; margin: 0 8px 14px; }
+    .nav-link { display: flex; gap: 11px; align-items: baseline; padding: 8px 10px; border-radius: 7px; margin-bottom: 3px; color: #cad5e5; text-decoration: none; font-size: 13px; line-height: 1.5; }
+    .nav-link:hover, .nav-link.is-active { background: #25374d; color: #fff; }
+    .nav-link.is-active { box-shadow: inset 3px 0 #ee8c61; }
+    .nav-number { flex: 0 0 18px; color: #9cb1ca; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .nav-link.level-3 { padding-left: 37px; color: #b7c8de; font-size: 12px; }
+    .nav-dot { width: 4px; height: 4px; background: #9cb1ca; flex: 0 0 4px; border-radius: 50%; align-self: center; }
+    .sidebar-footer { padding: 16px 8px 0; border-top: 1px solid #34445b; font-size: 12px; color: #a8bad1; }
+    .sidebar-footer a { display: inline-block; color: #e0e8f3; }
+    main { min-width: 0; width: 100%; max-width: 1240px; margin: 0 auto; padding: 52px clamp(24px, 4vw, 72px) 36px; }
+    .eyebrow { font-size: 11px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; }
+    .hero { margin-bottom: 32px; }
+    h1 { max-width: 820px; font-size: clamp(34px, 3.5vw, 52px); letter-spacing: -.045em; line-height: 1.1; margin: 0 0 24px; font-weight: 750; }
+    h1 + p { font-size: 18px; color: var(--muted); max-width: 78ch; }
+    h2, h3 { letter-spacing: -.025em; scroll-margin-top: 28px; }
+    h2 { font-size: 26px; line-height: 1.25; font-weight: 720; margin: 0; }
+    h3 { font-size: 22px; line-height: 1.4; margin: 38px 0 18px; padding-top: 26px; border-top: 1px solid var(--line); }
+    p { margin: 0 0 18px; }
+    p:last-child { margin-bottom: 0; }
+    .hero-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+    .hero-links a { text-decoration: none; padding: 10px 16px; font-size: 14px; font-weight: 650; border-radius: 7px; background: white; color: var(--ink); border: 1px solid #c7d2df; }
+    .hero-links a:first-child { background: var(--ink); color: white; border-color: var(--ink); }
+    .hero-links a:hover { border-color: var(--accent); }
+    .caution { border-left: 3px solid #c87132; background: #fff4e8; color: #6d401f; padding: 18px 22px; border-radius: 0 8px 8px 0; margin-top: 26px; font-size: 14px; }
+    .caution-title { display: block; margin-bottom: 5px; font-size: 14px; color: #6c3615; }
+    .caution p { margin: 0; }
+    .doc-section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 30px 32px 32px; margin-bottom: 24px; min-width: 0; }
+    .section-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
+    .section-number { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border: 1px solid #dce3ec; border-radius: 8px; color: #687d93; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    ul, ol { padding-left: 24px; margin: 18px 0 22px; }
+    li { padding-left: 5px; margin: 7px 0; }
+    li::marker { color: #7b4b31; font-weight: 600; }
+    code { font: .88em/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: #edf1f6; color: #283d55; }
+    .code-block { overflow: hidden; border-radius: 9px; background: #132136; margin: 20px 0 24px; }
+    .code-toolbar { display: flex; align-items: center; justify-content: space-between; background: #1d2d43; padding: 8px 16px; border-bottom: 1px solid #334257; color: #bccbdd; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .06em; }
+    .copy-button { padding: 3px 10px; min-height: 28px; border: 1px solid #6c7d91; border-radius: 5px; background: transparent; color: #e0e8f3; cursor: pointer; font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .copy-button:hover { background: #34475f; }
+    pre { margin: 0; padding: 20px; overflow-x: auto; scrollbar-width: thin; color: #e3ebf5; font-size: 13px; line-height: 1.8; tab-size: 4; }
+    pre code { font-size: inherit; overflow-wrap: normal; }
+    .table-scroll { overflow-x: auto; margin: 20px 0 24px; border: 1px solid var(--line); border-radius: 8px; scrollbar-width: thin; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.65; }
+    th { padding: 12px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .045em; color: #465971; background: #eef2f7; white-space: nowrap; }
+    td { padding: 13px 14px; vertical-align: top; border-top: 1px solid #e2e8f0; }
+    td:first-child { font-weight: 500; }
+    tbody tr:nth-child(even) { background: #fafbfd; }
+    table code { white-space: nowrap; }
+    .page-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 8px 2px; color: var(--muted); font-size: 13px; }
+    .page-footer a { color: var(--muted); }
+    .copy-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (max-width: 1020px) {
+      .layout { grid-template-columns: 240px minmax(0, 1fr); }
+      .sidebar { padding: 26px 14px 20px; }
+      main { padding: 36px 24px; }
+      .doc-section { padding: 25px 24px; }
+      h2 { font-size: 23px; }
+    }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      .sidebar { position: static; height: auto; padding: 20px; gap: 18px; }
+      .brand { padding: 0; }
+      .mail-shortcut { margin: 0; }
+      .toc { overflow: visible; flex: none; }
+      .toc summary { margin: 0; padding: 4px 0; }
+      .toc[open] summary { margin-bottom: 12px; }
+      .toc nav { max-height: 52vh; overflow-y: auto; margin-top: 4px; }
+      .sidebar-footer { display: none; }
+      main { padding: 30px 16px 24px; }
+      .eyebrow { margin-bottom: 12px; }
+      h1 { font-size: 36px; }
+      h1 + p { font-size: 16px; }
+      .doc-section { padding: 24px 18px; }
+      .section-heading { gap: 10px; align-items: flex-start; }
+      h2 { font-size: 22px; }
+      h3 { font-size: 20px; }
+      .caution { padding: 16px; }
+      .hero-links a { flex: 1 1 180px; text-align: center; }
+      pre { padding: 16px; font-size: 12px; }
+      table { min-width: 600px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      body { background: white; font-size: 11pt; color: #111; }
+      .layout { display: block; }
+      .sidebar, .skip-link, .hero-links, .copy-button { display: none; }
+      main { padding: 0; max-width: none; }
+      .doc-section { border: 0; padding: 20px 0; }
+      .section-heading, h3 { break-after: avoid; }
+      .code-block, table tr { break-inside: avoid; }
+      .code-block, .code-toolbar { background: #f3f3f3; color: #111; }
+      pre { color: #111; white-space: pre-wrap; }
+      pre code { overflow-wrap: anywhere; }
+      .table-scroll { overflow: visible; }
+      table { min-width: 0; }
+      a { color: inherit; }
+    }
+
+    .page-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+    .page-tabs a { padding: 9px 16px; border: 1px solid #c7d2df; border-radius: 7px; text-decoration: none; background: white; color: var(--ink); font-size: 14px; font-weight: 650; }
+    .page-tabs a[aria-current="page"] { background: var(--ink); border-color: var(--ink); color: white; }
+    @media print { .page-tabs { display: none; } }
+  </style>
+  <link rel="stylesheet" href="docs-theme.css">
+</head>
+<body>
+  <!-- Content rendered from README.md. Keep documentation changes in both files. -->
+  <a class="skip-link" href="#contenido">Saltar al contenido</a>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Navegación de la guía">
+      <a class="brand" href="#inicio"><span class="brand-mark" aria-hidden="true">&gt;_</span><span><strong>CCDC</strong><small>Red Team · Guía de prácticas</small></span></a>
+      <a class="mail-shortcut" href="#leer-correo-desde-cli">Leer correo desde CLI <span aria-hidden="true">↗</span></a>
+      <details class="toc" open>
+        <summary>En esta guía · 12 secciones</summary>
+        <nav aria-label="Secciones del README">
+<a class="nav-link level-2" href="#mapa-rapido"><span class="nav-number" aria-hidden="true">01</span><span>Mapa rápido</span></a>
+<a class="nav-link level-2" href="#flujo-recomendado-de-una-practica"><span class="nav-number" aria-hidden="true">02</span><span>Flujo recomendado de una práctica</span></a>
+<a class="nav-link level-2" href="#monitor-web-de-canaries"><span class="nav-number" aria-hidden="true">03</span><span>Monitor web de canaries</span></a>
+<a class="nav-link level-2" href="#ubuntu-base"><span class="nav-number" aria-hidden="true">04</span><span>Ubuntu base</span></a>
+<a class="nav-link level-2" href="#ubuntu-24-04-con-monitor"><span class="nav-number" aria-hidden="true">05</span><span>Ubuntu 24.04 con monitor</span></a>
+<a class="nav-link level-2" href="#fedora"><span class="nav-number" aria-hidden="true">06</span><span>Fedora</span></a>
+<a class="nav-link level-2" href="#windows"><span class="nav-number" aria-hidden="true">07</span><span>Windows</span></a>
+<a class="nav-link level-2" href="#laboratorios-web-base-de-datos-y-servicios"><span class="nav-number" aria-hidden="true">08</span><span>Laboratorios web, base de datos y servicios</span></a>
+<a class="nav-link level-3" href="#apache-php-y-mysql"><span class="nav-dot" aria-hidden="true"></span><span>Apache, PHP y MySQL</span></a>
+<a class="nav-link level-3" href="#correo-y-web-en-ubuntu-server-24-04"><span class="nav-dot" aria-hidden="true"></span><span>Correo y web en Ubuntu Server 24.04</span></a>
+<a class="nav-link level-3" href="#leer-correo-desde-cli"><span class="nav-dot" aria-hidden="true"></span><span>Leer correo desde CLI</span></a>
+<a class="nav-link level-2" href="#artefactos-opcionales-apollo-y-poseidon"><span class="nav-number" aria-hidden="true">09</span><span>Artefactos opcionales Apollo y Poseidon</span></a>
+<a class="nav-link level-2" href="#interpretacion-de-los-checkers"><span class="nav-number" aria-hidden="true">10</span><span>Interpretación de los checkers</span></a>
+<a class="nav-link level-2" href="#validacion-antes-de-desplegar"><span class="nav-number" aria-hidden="true">11</span><span>Validación antes de desplegar</span></a>
+<a class="nav-link level-2" href="#seguridad-y-recuperacion"><span class="nav-number" aria-hidden="true">12</span><span>Seguridad y recuperación</span></a>
+        </nav>
+      </details>
+      <div class="sidebar-footer">Documento de referencia<br><a href="../README.md">Abrir README.md ↗</a></div>
+    </aside>
+    <main id="contenido" tabindex="-1">
+      <div class="language-switch" role="group" aria-label="Idioma / Language"><button type="button" data-language="es" lang="es" aria-pressed="true">Español</button><button type="button" data-language="en" lang="en" aria-pressed="false">English</button></div>
+      <nav class="page-tabs" aria-label="Páginas de documentación"><a href="ccdc_php.html" aria-current="page">Guía del laboratorio</a><a href="validacion-apache.html">Validación Apache2</a><a href="../fixphp.html">fixphp</a></nav>
+      <div class="hero" id="inicio">
+        <div class="eyebrow">Documentación / Laboratorio CCDC</div>
+<h1 id="ccdc-red-team-training-artifacts">CCDC Red Team Training Artifacts</h1>
+<p>Repositorio de escenarios deliberadamente vulnerables, checkers de limpieza y herramientas de observación para prácticas autorizadas de CCDC. Los nombres <code>redhavi*</code> se conservan en los scripts históricos para no romper despliegues y material de clase; el monitor web se llama <code>ccdc-canary-monitor</code>.</p>
+<p>Versión navegable por secciones: <a href="ccdc_php.html">ccdc_php.html</a>.</p>
+<aside class="caution" aria-label="Precaución"><strong class="caution-title">Laboratorio deliberadamente vulnerable</strong><p>Los seeders crean usuarios débiles, persistencia, claves SSH, contenido web vulnerable y servicios inseguros. Úsalos únicamente en máquinas virtuales desechables, aisladas y con snapshot. Nunca en producción ni directamente en Internet.</p></aside>
+        <div class="hero-links"><a href="#leer-correo-desde-cli">Leer correo desde CLI →</a><a href="#mapa-rapido">Explorar los scripts ↓</a></div>
+      </div>
+<section class="doc-section" aria-labelledby="mapa-rapido"><header class="section-heading"><span class="section-number" aria-hidden="true">01</span><h2 id="mapa-rapido">Mapa rápido</h2></header>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Tabla de referencia"><table><thead><tr><th scope="col">Archivo</th><th scope="col">Plataforma</th><th scope="col">Función</th><th scope="col">Modifica el sistema</th></tr></thead><tbody><tr><td><code>redhavi</code></td><td>Ubuntu</td><td>Escenario Linux base: paquetes inseguros, usuarios, cron, webshell de práctica y clave SSH.</td><td>Sí</td></tr><tr><td><code>redhavi-ubuntu24</code></td><td>Ubuntu 24.04</td><td>Perfil del escenario base que además instala el check-in periódico al monitor.</td><td>Sí</td></tr><tr><td><code>redhavi-fedora</code></td><td>Fedora</td><td>Escenario equivalente para Fedora; por defecto solo muestra un dry-run.</td><td>Solo con <code>--apply</code></td></tr><tr><td><code>redhavi-check</code></td><td>Ubuntu/Linux</td><td>Evalúa la limpieza del escenario Linux base.</td><td>No</td></tr><tr><td><code>redhavi-check-ubuntu24</code></td><td>Ubuntu 24.04</td><td>Evalúa 10 controles, incluido el servicio/timer canary.</td><td>No</td></tr><tr><td><code>redhavi-check-fedora</code></td><td>Fedora</td><td>Evalúa la limpieza del escenario Fedora.</td><td>No</td></tr><tr><td><code>redhavi-check-shc</code></td><td>Linux</td><td>Fuente adaptada para compilar el checker Linux con SHC.</td><td>No</td></tr><tr><td><code>redhavi-check-federo-shc</code></td><td>Fedora</td><td>Fuente SHC del checker Fedora; el nombre <code>federo</code> es histórico.</td><td>No</td></tr><tr><td><code>redhaviwin.ps1</code></td><td>Windows</td><td>Prepara el escenario Windows con cuentas, persistencia, web y check-ins.</td><td>Sí</td></tr><tr><td><code>redhavi-checkWin.ps1</code></td><td>Windows</td><td>Evalúa la limpieza del escenario Windows.</td><td>No</td></tr><tr><td><code>redhavi-checkWin-ps2exe.ps1</code></td><td>Windows</td><td>Empaqueta el checker de PowerShell como EXE mediante PS2EXE.</td><td>Crea un archivo</td></tr><tr><td><code>ccdc-canary-monitor</code></td><td>Python 3</td><td>Servidor de check-ins y dashboard web para el instructor.</td><td>Solo su JSON de estado</td></tr><tr><td><code>ecomredhavi</code></td><td>Ubuntu/Debian</td><td>Laboratorio Apache, PHP y MySQL con configuraciones débiles e indicadores inertes.</td><td>Sí</td></tr><tr><td><code>ecomredhavimysql</code></td><td>Ubuntu/Debian</td><td>Variante explícita del laboratorio web/MySQL con headers débiles y contraseñas conocidas.</td><td>Sí</td></tr><tr><td><code>instservices</code></td><td>Ubuntu Server 24.04</td><td>Instala Postfix, Dovecot, 12 usuarios de correo, Apache y PHP con fallos intencionales.</td><td>Sí</td></tr><tr><td><code>redhavi-apolloWin.ps1</code></td><td>Windows</td><td>Artefacto opcional de tarea programada para un payload Apollo autorizado.</td><td>Sí</td></tr><tr><td><code>redhavi-poseidon</code></td><td>Linux/systemd</td><td>Artefacto opcional de servicio y timer para un payload Poseidon autorizado.</td><td>Sí</td></tr><tr><td><code>redhavi-task.md</code></td><td>Todas</td><td>Hoja de investigación que se entrega al Blue Team.</td><td>No</td></tr><tr><td><code>INSTALLATION.md</code></td><td>Todas</td><td>Guía detallada de instalación, compilación y solución de problemas.</td><td>No</td></tr></tbody></table></div>
+<p><code>apollo1.exe</code> y <code>poseidon.bin</code> son placeholders vacíos. No son payloads funcionales.</p>
+</section>
+<section class="doc-section" aria-labelledby="flujo-recomendado-de-una-practica"><header class="section-heading"><span class="section-number" aria-hidden="true">02</span><h2 id="flujo-recomendado-de-una-practica">Flujo recomendado de una práctica</h2></header>
+<ol><li>Crea una VM desechable compatible y toma un snapshot.</li><li>Aísla la red de producción e Internet.</li><li>Si el escenario usa canaries, inicia primero <code>ccdc-canary-monitor</code> en el equipo del instructor.</li><li>Ejecuta <strong>un</strong> seeder apropiado para el sistema operativo.</li><li>Guarda la salida inicial del checker correspondiente.</li><li>Entrega <code>redhavi-task.md</code> y el checker al equipo.</li><li>Repite el checker después de cada grupo de correcciones.</li><li>Comprueba que cesen los check-ins, sin asumir que verde demuestra limpieza.</li><li>Guarda resultados y restaura el snapshot.</li></ol>
+<p>No mezcles varios seeders en la misma VM salvo que el diseño del ejercicio lo requiera expresamente.</p>
+</section>
+<section class="doc-section" aria-labelledby="monitor-web-de-canaries"><header class="section-heading"><span class="section-number" aria-hidden="true">03</span><h2 id="monitor-web-de-canaries">Monitor web de canaries</h2></header>
+<p>El monitor registra la IP, cantidad de check-ins y tiempo desde la última conexión:</p>
+<ul><li><strong>RED</strong>: la máquina llamó recientemente a <code>/checkin</code>; la persistencia parece seguir activa.</li><li><strong>GREEN</strong>: superó el umbral sin llamar. También puede significar VM apagada, pérdida de red o bloqueo por firewall; no sustituye al checker.</li></ul>
+<p>No tiene autenticación. Ejecútalo solamente en la interfaz de la red aislada.</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">mkdir -p build
+python3 ./ccdc-canary-monitor \
+  --bind IP_DEL_MONITOR \
+  --port 8081 \
+  --clean-threshold 240 \
+  --state ./build/ccdc-monitor-state.json
+</code></pre></div>
+<p>Abre <code>http://IP_DEL_MONITOR:8081/</code>. Prueba un check-in inocuo con:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">curl --fail --silent --show-error http://IP_DEL_MONITOR:8081/checkin
+curl --fail --silent --show-error http://IP_DEL_MONITOR:8081/api/status
+</code></pre></div>
+<p>Opciones principales:</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Tabla de referencia"><table><thead><tr><th scope="col">Opción</th><th scope="col">Valor predeterminado</th><th scope="col">Uso</th></tr></thead><tbody><tr><td><code>--bind</code></td><td><code>0.0.0.0</code></td><td>Interfaz donde escucha. Es mejor indicar la IP aislada.</td></tr><tr><td><code>--port</code></td><td><code>8081</code></td><td>Puerto HTTP.</td></tr><tr><td><code>--clean-threshold</code></td><td><code>240</code></td><td>Segundos sin check-in antes de mostrar verde.</td></tr><tr><td><code>--state</code></td><td><code>~/.ccdc-canary-monitor.json</code></td><td>JSON persistente del dashboard.</td></tr><tr><td><code>--payload</code></td><td>Canary inocuo incluido</td><td>Archivo que devuelve <code>/checkin</code>.</td></tr><tr><td><code>--no-auto-discover</code></td><td>Desactivado</td><td>Evita añadir automáticamente IPs nuevas.</td></tr></tbody></table></div>
+</section>
+<section class="doc-section" aria-labelledby="ubuntu-base"><header class="section-heading"><span class="section-number" aria-hidden="true">04</span><h2 id="ubuntu-base">Ubuntu base</h2></header>
+<p>El seeder <code>redhavi</code> instala el escenario Ubuntu histórico. No activa el timer del monitor en su perfil predeterminado.</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo ./redhavi
+sudo ./redhavi --verify
+sudo ./redhavi-check
+</code></pre></div>
+<p>El checker exige el marcador preparado en <code>/var/lib/redhavi/state</code>. Ejecutarlo sin haber desplegado el escenario correspondiente produce un error de infraestructura, no una puntuación válida.</p>
+</section>
+<section class="doc-section" aria-labelledby="ubuntu-24-04-con-monitor"><header class="section-heading"><span class="section-number" aria-hidden="true">05</span><h2 id="ubuntu-24-04-con-monitor">Ubuntu 24.04 con monitor</h2></header>
+<p>Este es el perfil recomendado cuando se quiere visualizar la persistencia en el dashboard. <code>redhavi-ubuntu24</code> debe permanecer junto a <code>redhavi</code>, y <code>redhavi-check-ubuntu24</code> junto a <code>redhavi-check</code>.</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo CANARY_URL=http://IP_DEL_MONITOR:8081/checkin \
+  ./redhavi-ubuntu24
+
+sudo ./redhavi-ubuntu24 --verify
+sudo ./redhavi-check-ubuntu24
+</code></pre></div>
+<p>El perfil exige exactamente Ubuntu 24.04. Instala <code>redhavi-canary.service</code> y <code>redhavi-canary.timer</code>; el timer llama al monitor cada tres minutos. Puedes cambiar el intervalo durante el sembrado:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo CANARY_URL=http://IP_DEL_MONITOR:8081/checkin \
+  CANARY_INTERVAL=5 ./redhavi-ubuntu24
+</code></pre></div>
+</section>
+<section class="doc-section" aria-labelledby="fedora"><header class="section-heading"><span class="section-number" aria-hidden="true">06</span><h2 id="fedora">Fedora</h2></header>
+<p>Sin argumentos, el seeder hace un dry-run seguro. Revisa primero esa salida:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">./redhavi-fedora
+</code></pre></div>
+<p>Para aplicar el escenario en una VM Fedora autorizada:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo CANARY_URL=http://IP_DEL_MONITOR:8081/checkin \
+  ./redhavi-fedora --apply
+</code></pre></div>
+<p>La confirmación interactiva requiere escribir <code>LAB</code>. Para automatizar una VM ya aislada se puede añadir <code>--yes</code>:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo CANARY_URL=http://IP_DEL_MONITOR:8081/checkin \
+  ./redhavi-fedora --apply --yes
+
+sudo ./redhavi-check-fedora
+</code></pre></div>
+</section>
+<section class="doc-section" aria-labelledby="windows"><header class="section-heading"><span class="section-number" aria-hidden="true">07</span><h2 id="windows">Windows</h2></header>
+<p>Ejecuta PowerShell 5.1 de 64 bits como Administrador. El seeder instala su check-in canary cada tres minutos y acepta una URL específica:</p>
+<div class="code-block"><div class="code-toolbar"><span>powershell</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-powershell">Set-ExecutionPolicy -Scope Process Bypass
+.\redhaviwin.ps1 -CanaryUrl &#x27;http://IP_DEL_MONITOR:8081/checkin&#x27;
+.\redhaviwin.ps1 -Verify
+.\redhavi-checkWin.ps1
+</code></pre></div>
+<p>Para compilar el checker como EXE:</p>
+<div class="code-block"><div class="code-toolbar"><span>powershell</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-powershell">.\redhavi-checkWin-ps2exe.ps1
+.\Red_team_artifacts.exe
+</code></pre></div>
+<p>Usa <code>-Force</code> en el compilador solamente cuando quieras reemplazar intencionalmente un EXE existente.</p>
+</section>
+<section class="doc-section" aria-labelledby="laboratorios-web-base-de-datos-y-servicios"><header class="section-heading"><span class="section-number" aria-hidden="true">08</span><h2 id="laboratorios-web-base-de-datos-y-servicios">Laboratorios web, base de datos y servicios</h2></header>
+<h3 id="apache-php-y-mysql">Apache, PHP y MySQL</h3>
+<p>Los dos scripts siguientes instalan paquetes y cambian la configuración real de Apache/MySQL. No tienen modo dry-run ni checker dedicado.</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">./ecomredhavi
+# o, para la variante con más ajustes débiles explícitos:
+./ecomredhavimysql
+</code></pre></div>
+<p>Crean bases y usuarios <code>magento</code>, <code>opencart</code>, <code>wordpress</code> y <code>drupal</code>, con la contraseña de práctica <code>metro</code>, un sitio adicional en el puerto <code>8080</code>, <code>phpinfo</code>, listado de directorios e indicadores web inertes.</p>
+<h3 id="correo-y-web-en-ubuntu-server-24-04">Correo y web en Ubuntu Server 24.04</h3>
+<p>Consulta primero la ayuda y luego ejecuta con confirmación:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">./instservices --help
+sudo ./instservices \
+  --mail-hostname mail.ccdcteam.com \
+  --mail-domain ccdcteam.com
+</code></pre></div>
+<p>En automatización controlada se puede añadir <code>--yes</code>. Instala SMTP/25, IMAP/143, HTTP/80 y HTTPS/443, además de permisos débiles, divulgación de versiones, listado de directorios y una XSS reflejada de laboratorio.</p>
+<p>También crea 12 usuarios locales legítimos: <code>ana.garcia</code>, <code>carlos.lopez</code>, <code>maria.rodriguez</code>, <code>jose.martinez</code>, <code>laura.hernandez</code>, <code>pedro.sanchez</code>, <code>sofia.ramirez</code>, <code>diego.torres</code>, <code>elena.flores</code>, <code>miguel.rivera</code>, <code>lucia.gomez</code> y <code>andres.diaz</code>. Cada cuenta nueva recibe una contraseña generada durante la instalación y un buzón <code>~/Maildir</code> con las carpetas <code>cur</code>, <code>new</code> y <code>tmp</code>. Las contraseñas iniciales se guardan en <code>/root/instservices-mail-users.tsv</code> en el servidor; consulta el archivo con:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo cat /root/instservices-mail-users.tsv
+</code></pre></div>
+<p>Para leer correo, conecta un cliente IMAP al servidor en el puerto <code>143</code>, usando el nombre de usuario sin dominio (por ejemplo, <code>ana.garcia</code>) y su contraseña. La dirección de correo es <code>usuario@DOMINIO</code>, con el dominio seleccionado mediante <code>--mail-domain</code>. Dovecot ya forma parte de la instalación. Al repetir el instalador, se conservan las cuentas, contraseñas y mensajes existentes. El archivo registra solo las contraseñas iniciales de las cuentas creadas por el instalador. Los permisos y las vulnerabilidades intencionales del laboratorio se mantienen.</p>
+<h3 id="leer-correo-desde-cli">Leer correo desde CLI</h3>
+<p>Ejecuta los comandos de lectura desde el servidor o desde otro equipo de la red del laboratorio. Sustituye <code>IP_DEL_SERVIDOR</code> por la IP de la VM; si estás en el propio servidor, puedes usar <code>127.0.0.1</code>. En Ubuntu, instala el cliente si hace falta:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo apt-get install -y curl
+</code></pre></div>
+<p>Usa una de las 12 cuentas, por ejemplo <code>ana.garcia</code>, y consulta su contraseña inicial en <code>/root/instservices-mail-users.tsv</code> en el servidor. Al indicar solo el usuario con <code>--user</code>, curl solicita la contraseña en la terminal. Estos ejemplos usan IMAP/143 sin TLS, tal como permite el laboratorio.</p>
+<p><strong>1. Listar los buzones disponibles:</strong></p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">curl --silent --show-error --user ana.garcia \
+  --url &#x27;imap://IP_DEL_SERVIDOR:143/&#x27;
+</code></pre></div>
+<p><strong>2. Buscar los identificadores (UID) de los mensajes en INBOX:</strong></p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">curl --silent --show-error --user ana.garcia \
+  --url &#x27;imap://IP_DEL_SERVIDOR:143/INBOX&#x27; \
+  --request &#x27;UID SEARCH ALL&#x27;
+</code></pre></div>
+<p>Una respuesta como <code>* SEARCH 1 2</code> indica que existen los UID <code>1</code> y <code>2</code>. Si devuelve <code>* SEARCH</code> sin números, el buzón está vacío.</p>
+<p><strong>3. Leer un mensaje completo, incluidos encabezados y cuerpo:</strong></p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">curl --silent --show-error --user ana.garcia \
+  --url &#x27;imap://IP_DEL_SERVIDOR:143/INBOX/;UID=1&#x27;
+</code></pre></div>
+<p>Sustituye <code>1</code> por uno de los UID que devolvió la búsqueda; los UID no tienen por qué ser consecutivos. Mantén las comillas de la URL, porque contiene <code>;</code>. La <a href="https://curl.se/docs/url-syntax.html#imap">documentación de curl sobre IMAP</a> describe estas búsquedas y la lectura por UID.</p>
+<p><strong>4. Enviar un correo de prueba local para tener algo que leer:</strong></p>
+<p>Ejecuta esto en el servidor de correo. Si usaste otro <code>--mail-domain</code>, cambia <code>ccdcteam.com</code> en las dos direcciones:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">printf &#x27;%s\n&#x27; \
+  &#x27;From: carlos.lopez@ccdcteam.com&#x27; \
+  &#x27;To: ana.garcia@ccdcteam.com&#x27; \
+  &#x27;Subject: Prueba de correo CCDC&#x27; \
+  &#x27;&#x27; \
+  &#x27;Hola Ana, este es un mensaje de prueba del laboratorio.&#x27; |
+  sudo -u carlos.lopez /usr/sbin/sendmail -i -t
+</code></pre></div>
+<p>Después repite la búsqueda y lectura de INBOX. Postfix entrega el mensaje al Maildir de Ana y Dovecot permite leerlo por IMAP.</p>
+</section>
+<section class="doc-section" aria-labelledby="artefactos-opcionales-apollo-y-poseidon"><header class="section-heading"><span class="section-number" aria-hidden="true">09</span><h2 id="artefactos-opcionales-apollo-y-poseidon">Artefactos opcionales Apollo y Poseidon</h2></header>
+<p>Estos scripts requieren un payload recién generado para un ejercicio autorizado. Los placeholders incluidos no funcionan. Usa siempre un SHA-256 conocido y un servidor aislado.</p>
+<p>Windows/Apollo:</p>
+<div class="code-block"><div class="code-toolbar"><span>powershell</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-powershell">.\redhavi-apolloWin.ps1 `
+  -DownloadUrl &#x27;http://SERVIDOR_AUTORIZADO:8087/apollo1.exe&#x27; `
+  -ExpectedSha256 &#x27;HASH_SHA256_DE_64_CARACTERES&#x27;
+
+.\redhavi-apolloWin.ps1 -Remove
+</code></pre></div>
+<p>Linux/Poseidon:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">sudo ./redhavi-poseidon \
+  --download-url http://SERVIDOR_AUTORIZADO:8087/poseidon.bin \
+  --expected-sha256 HASH_SHA256_DE_64_CARACTERES
+
+sudo ./redhavi-poseidon --remove
+</code></pre></div>
+<p>Los checkers principales no puntúan estos artefactos opcionales.</p>
+</section>
+<section class="doc-section" aria-labelledby="interpretacion-de-los-checkers"><header class="section-heading"><span class="section-number" aria-hidden="true">10</span><h2 id="interpretacion-de-los-checkers">Interpretación de los checkers</h2></header>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Tabla de referencia"><table><thead><tr><th scope="col">Código</th><th scope="col">Significado</th></tr></thead><tbody><tr><td><code>0</code></td><td>Todos los controles puntuados pasaron.</td></tr><tr><td><code>1</code></td><td>Quedan hallazgos del escenario.</td></tr><tr><td><code>2</code></td><td>Error de infraestructura, permisos, estado o dependencia, cuando el checker distingue esta condición.</td></tr></tbody></table></div>
+<p>Un checker solo evalúa su rúbrica. Un resultado limpio no demuestra por sí solo que la máquina esté libre de toda actividad maliciosa.</p>
+</section>
+<section class="doc-section" aria-labelledby="validacion-antes-de-desplegar"><header class="section-heading"><span class="section-number" aria-hidden="true">11</span><h2 id="validacion-antes-de-desplegar">Validación antes de desplegar</h2></header>
+<p>Desde la raíz del repositorio:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">bash -n redhavi redhavi-ubuntu24 redhavi-fedora \
+  redhavi-check redhavi-check-ubuntu24 redhavi-check-fedora \
+  redhavi-check-shc redhavi-check-federo-shc redhavi-poseidon \
+  ecomredhavi ecomredhavimysql instservices
+
+python3 -m py_compile ccdc-canary-monitor
+</code></pre></div>
+<p>Si está instalado:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copiar comandos">Copiar</button></div><pre><code class="language-bash">shellcheck redhavi redhavi-* ecomredhavi* instservices
+</code></pre></div>
+<p>Consulta <a href="../INSTALLATION.md">INSTALLATION.md</a> para compilación con SHC, copia a otras VMs, empaquetado de Windows y resolución de problemas.</p>
+</section>
+<section class="doc-section" aria-labelledby="seguridad-y-recuperacion"><header class="section-heading"><span class="section-number" aria-hidden="true">12</span><h2 id="seguridad-y-recuperacion">Seguridad y recuperación</h2></header>
+<ul><li>Guarda snapshots antes de sembrar un escenario.</li><li>No confirmes cambios si el sistema operativo o la red no son los esperados.</li><li>No subas credenciales, claves privadas, payloads reales ni archivos de estado al repositorio.</li><li>Limita el puerto <code>8081</code> del monitor a la red de práctica.</li><li>Verifica hashes de todo artefacto descargado.</li><li>Restaura la VM al terminar; no confíes únicamente en una limpieza manual.</li></ul>
+<p>Este es un proyecto educativo independiente; no está afiliado oficialmente a CCDC.</p>
+</section>
+      <footer class="page-footer"><span>CCDC Red Team Training Artifacts</span><a href="#inicio">Volver al inicio ↑</a></footer>
+    </main>
+  </div>
+  <p class="copy-status" role="status" aria-live="polite"></p>
+  <script>
+    const toc = document.querySelector('.toc');
+    const mobile = window.matchMedia('(max-width: 760px)');
+    const syncNavigation = () => { toc.open = !mobile.matches; };
+    syncNavigation();
+    mobile.addEventListener('change', syncNavigation);
+    document.querySelectorAll('.toc a').forEach(link => link.addEventListener('click', () => {
+      if (mobile.matches) toc.open = false;
+    }));
+
+    const links = Array.from(document.querySelectorAll('.nav-link'));
+    const targets = links.map(link => document.getElementById(link.hash.slice(1)));
+    let scheduled = false;
+    function updateActiveSection() {
+      let active = -1;
+      targets.forEach((target, index) => { if (target.getBoundingClientRect().top <= 160) active = index; });
+      links.forEach((link, index) => {
+        link.classList.toggle('is-active', index === active);
+        if (index === active) link.setAttribute('aria-current', 'location');
+        else link.removeAttribute('aria-current');
+      });
+      scheduled = false;
+    }
+    window.addEventListener('scroll', () => {
+      if (!scheduled) { scheduled = true; requestAnimationFrame(updateActiveSection); }
+    }, { passive: true });
+    updateActiveSection();
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        try { await navigator.clipboard.writeText(text); return; } catch (_) { /* Local-file fallback below. */ }
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.cssText = 'position:fixed;top:0;left:-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Copy unavailable');
+    }
+    document.querySelectorAll('.copy-button').forEach(button => {
+      button.addEventListener('click', async () => {
+        const code = button.closest('.code-block').querySelector('pre code');
+        try {
+          await copyText(code.textContent);
+          button.textContent = window.docsText('copied');
+          document.querySelector('.copy-status').textContent = window.docsText('copySuccess');
+        } catch (_) {
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          button.textContent = window.docsText('selected');
+          document.querySelector('.copy-status').textContent = window.docsText('copyFallback');
+        }
+        button.focus({ preventScroll: true });
+        setTimeout(() => { button.textContent = window.docsText('copy'); }, 2200);
+      });
+    });
+  </script>
+  <script src="docs-i18n.js"></script>
+</body>
+</html>

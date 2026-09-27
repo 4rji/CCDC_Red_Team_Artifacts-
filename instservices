@@ -4,6 +4,21 @@ set -Eeuo pipefail
 PROGRAM_NAME="${0##*/}"
 MAIL_HOSTNAME="mail.ccdcteam.com"
 MAIL_DOMAIN="ccdcteam.com"
+MAIL_USERS_FILE="/root/instservices-mail-users.tsv"
+MAIL_USERS=(
+    'ana.garcia:Ana Garcia'
+    'carlos.lopez:Carlos Lopez'
+    'maria.rodriguez:Maria Rodriguez'
+    'jose.martinez:Jose Martinez'
+    'laura.hernandez:Laura Hernandez'
+    'pedro.sanchez:Pedro Sanchez'
+    'sofia.ramirez:Sofia Ramirez'
+    'diego.torres:Diego Torres'
+    'elena.flores:Elena Flores'
+    'miguel.rivera:Miguel Rivera'
+    'lucia.gomez:Lucia Gomez'
+    'andres.diaz:Andres Diaz'
+)
 ASSUME_YES=0
 
 usage() {
@@ -13,6 +28,7 @@ Uso: sudo ./${PROGRAM_NAME} [opciones]
 Instala un laboratorio CCDC deliberadamente vulnerable en Ubuntu Server 24.04:
   - Postfix: SMTP en el puerto 25
   - Dovecot: IMAP en el puerto 143
+  - 12 usuarios legitimos de correo con buzones Maildir y contrasenas iniciales
   - Apache: HTTP en el puerto 80 y HTTPS en el puerto 443
   - PHP: pagina vulnerable en /ccdc-lab.php
 
@@ -26,6 +42,8 @@ ADVERTENCIA: crea permisos universales y vulnerabilidades intencionales.
 Usalo solamente en una maquina aislada y autorizada para CCDC.
 Si UFW ya esta activo, permite los puertos 25, 80, 143 y 443.
 El script no activa UFW automaticamente.
+Las contrasenas iniciales se guardan en ${MAIL_USERS_FILE}.
+Las cuentas existentes conservan sus contrasenas y su correo.
 EOF
 }
 
@@ -36,6 +54,41 @@ die() {
 
 log() {
   echo "[INFO] $*"
+}
+
+create_mail_users() {
+    local user_record username full_name password passwd_entry user_home
+    local created=0 existing=0
+
+    if [[ ! -s "$MAIL_USERS_FILE" ]]; then
+        printf 'usuario\tcontrasena_inicial\n' > "$MAIL_USERS_FILE"
+    fi
+
+    for user_record in "${MAIL_USERS[@]}"; do
+        IFS=: read -r username full_name <<< "$user_record"
+        if passwd_entry="$(getent passwd "$username")"; then
+            log "Cuenta existente: ${username}; se conserva su contrasena."
+            existing=$((existing + 1))
+        else
+            password="$(openssl rand -hex 12)"
+            useradd --create-home --shell /bin/bash --comment "$full_name" "$username"
+            printf '%s:%s\n' "$username" "$password" | chpasswd
+            printf '%s\t%s\n' "$username" "$password" >> "$MAIL_USERS_FILE"
+            passwd_entry="$(getent passwd "$username")"
+            log "Cuenta de correo creada: ${username}@${MAIL_DOMAIN}"
+            created=$((created + 1))
+        fi
+
+        IFS=: read -r _ _ _ _ _ user_home _ <<< "$passwd_entry"
+        [[ -n "$user_home" && "$user_home" != / ]] || \
+            die "Directorio personal invalido para ${username}."
+        # El propio usuario crea su buzon sin cambiar permisos de rutas existentes.
+        runuser -u "$username" -- mkdir -p -- \
+            "$user_home/Maildir/cur" "$user_home/Maildir/new" "$user_home/Maildir/tmp"
+    done
+
+    log "Correo: ${created} cuentas nuevas y ${existing} existentes."
+    log "Contrasenas iniciales de las cuentas creadas: ${MAIL_USERS_FILE}"
 }
 
 while (($#)); do
@@ -105,7 +158,7 @@ echo "postfix postfix/mailname string ${MAIL_DOMAIN}" | debconf-set-selections
 echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
 
 log "Instalando Postfix, Dovecot IMAP, Apache, PHP y certificados locales..."
-apt-get install -y postfix dovecot-core dovecot-imapd apache2 ssl-cert php libapache2-mod-php php-cli
+apt-get install -y postfix dovecot-core dovecot-imapd apache2 ssl-cert openssl php libapache2-mod-php php-cli
 
 PHP_VERSION="$(php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')"
 PHP_CCDC_INI="/etc/php/${PHP_VERSION}/apache2/conf.d/99-ccdc-misconfig.ini"
@@ -163,6 +216,9 @@ service imap-login {
   }
 }
 EOF
+
+log "Preparando ${#MAIL_USERS[@]} usuarios legitimos de correo..."
+create_mail_users
 
 log "Creando las misconfiguraciones de Apache para el laboratorio..."
 cat > /etc/apache2/conf-available/zz-ccdc-misconfig.conf <<'EOF'
@@ -290,6 +346,11 @@ Correo:
   Dominio:  ${MAIL_DOMAIN}
   SMTP:     puerto 25 (STARTTLS disponible)
   IMAP:     puerto 143 (login sin TLS permitido intencionalmente)
+  Usuarios: ${#MAIL_USERS[@]} cuentas locales con buzon Maildir en su directorio personal
+  Login:    nombre de usuario sin @${MAIL_DOMAIN} (ejemplo: ana.garcia)
+  Correo:   usuario@${MAIL_DOMAIN} (ejemplo: ana.garcia@${MAIL_DOMAIN})
+  Claves iniciales de las cuentas nuevas: ${MAIL_USERS_FILE}
+  Las cuentas existentes conservan sus contrasenas.
 
 Web:
   HTTP:     http://IP_DEL_SERVIDOR/

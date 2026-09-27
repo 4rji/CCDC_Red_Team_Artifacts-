@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en" data-doc-page="fixphp.html">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CCDC remediation guide: PHP command injection, path traversal, uploads, and Linux and Apache2 permissions.">
+  <meta name="color-scheme" content="dark">
+  <title>CCDC · fixphp · PHP Remediation Guide</title>
+  <style>
+    :root { --ink: #17283d; --muted: #536579; --accent: #b43d20; --paper: #f3f5f8; --line: #dce3ec; --sidebar: #132136; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 28px; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    a { color: var(--accent); text-underline-offset: 4px; }
+    a:hover { color: #762612; }
+    button, summary, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid #e89c52; outline-offset: 4px; }
+    .skip-link { position: fixed; top: 12px; left: 12px; z-index: 10; transform: translateY(-180%); background: white; padding: 8px 16px; border-radius: 6px; }
+    .skip-link:focus { transform: translateY(0); }
+    .layout { display: grid; grid-template-columns: 282px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 26px; padding: 32px 22px 24px; background: var(--sidebar); color: #d3deed; }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; text-decoration: none; color: white; }
+    .brand:hover { color: white; }
+    .brand-mark { display: grid; place-items: center; flex: 0 0 42px; height: 42px; color: #fff; background: #c94c2c; border-radius: 10px; font: 700 20px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .brand strong { display: block; font-size: 20px; line-height: 1.25; letter-spacing: .06em; }
+    .brand small { display: block; color: #a8bad1; font-size: 12px; line-height: 1.6; }
+    .mail-shortcut { margin: 0 6px; padding: 11px 14px; border: 1px solid #536174; border-radius: 8px; text-decoration: none; color: #fff; font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; }
+    .mail-shortcut:hover { background: #233850; color: white; border-color: #8294ab; }
+    .toc { min-height: 0; flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #55647a transparent; }
+    .toc summary { color: #a8bad1; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; margin: 0 8px 14px; }
+    .nav-link { display: flex; gap: 11px; align-items: baseline; padding: 8px 10px; border-radius: 7px; margin-bottom: 3px; color: #cad5e5; text-decoration: none; font-size: 13px; line-height: 1.5; }
+    .nav-link:hover, .nav-link.is-active { background: #25374d; color: #fff; }
+    .nav-link.is-active { box-shadow: inset 3px 0 #ee8c61; }
+    .nav-number { flex: 0 0 18px; color: #9cb1ca; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .nav-link.level-3 { padding-left: 37px; color: #b7c8de; font-size: 12px; }
+    .nav-dot { width: 4px; height: 4px; background: #9cb1ca; flex: 0 0 4px; border-radius: 50%; align-self: center; }
+    .sidebar-footer { padding: 16px 8px 0; border-top: 1px solid #34445b; font-size: 12px; color: #a8bad1; }
+    .sidebar-footer a { display: inline-block; color: #e0e8f3; }
+    main { min-width: 0; width: 100%; max-width: 1240px; margin: 0 auto; padding: 52px clamp(24px, 4vw, 72px) 36px; }
+    .eyebrow { font-size: 11px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; }
+    .hero { margin-bottom: 32px; }
+    h1 { max-width: 820px; font-size: clamp(34px, 3.5vw, 52px); letter-spacing: -.045em; line-height: 1.1; margin: 0 0 24px; font-weight: 750; }
+    h1 + p { font-size: 18px; color: var(--muted); max-width: 78ch; }
+    h2, h3 { letter-spacing: -.025em; scroll-margin-top: 28px; }
+    h2 { font-size: 26px; line-height: 1.25; font-weight: 720; margin: 0; }
+    h3 { font-size: 22px; line-height: 1.4; margin: 38px 0 18px; padding-top: 26px; border-top: 1px solid var(--line); }
+    p { margin: 0 0 18px; }
+    p:last-child { margin-bottom: 0; }
+    .hero-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+    .hero-links a { text-decoration: none; padding: 10px 16px; font-size: 14px; font-weight: 650; border-radius: 7px; background: white; color: var(--ink); border: 1px solid #c7d2df; }
+    .hero-links a:first-child { background: var(--ink); color: white; border-color: var(--ink); }
+    .hero-links a:hover { border-color: var(--accent); }
+    .caution { border-left: 3px solid #c87132; background: #fff4e8; color: #6d401f; padding: 18px 22px; border-radius: 0 8px 8px 0; margin-top: 26px; font-size: 14px; }
+    .caution-title { display: block; margin-bottom: 5px; font-size: 14px; color: #6c3615; }
+    .caution p { margin: 0; }
+    .doc-section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 30px 32px 32px; margin-bottom: 24px; min-width: 0; }
+    .section-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
+    .section-number { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border: 1px solid #dce3ec; border-radius: 8px; color: #687d93; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    ul, ol { padding-left: 24px; margin: 18px 0 22px; }
+    li { padding-left: 5px; margin: 7px 0; }
+    li::marker { color: #7b4b31; font-weight: 600; }
+    code { font: .88em/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: #edf1f6; color: #283d55; }
+    .code-block { overflow: hidden; border-radius: 9px; background: #132136; margin: 20px 0 24px; }
+    .code-toolbar { display: flex; align-items: center; justify-content: space-between; background: #1d2d43; padding: 8px 16px; border-bottom: 1px solid #334257; color: #bccbdd; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .06em; }
+    .copy-button { padding: 3px 10px; min-height: 28px; border: 1px solid #6c7d91; border-radius: 5px; background: transparent; color: #e0e8f3; cursor: pointer; font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .copy-button:hover { background: #34475f; }
+    pre { margin: 0; padding: 20px; overflow-x: auto; scrollbar-width: thin; color: #e3ebf5; font-size: 13px; line-height: 1.8; tab-size: 4; }
+    pre code { font-size: inherit; overflow-wrap: normal; }
+    .table-scroll { overflow-x: auto; margin: 20px 0 24px; border: 1px solid var(--line); border-radius: 8px; scrollbar-width: thin; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.65; }
+    th { padding: 12px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .045em; color: #465971; background: #eef2f7; white-space: nowrap; }
+    td { padding: 13px 14px; vertical-align: top; border-top: 1px solid #e2e8f0; }
+    td:first-child { font-weight: 500; }
+    tbody tr:nth-child(even) { background: #fafbfd; }
+    table code { white-space: nowrap; }
+    .page-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 8px 2px; color: var(--muted); font-size: 13px; }
+    .page-footer a { color: var(--muted); }
+    .copy-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (max-width: 1020px) {
+      .layout { grid-template-columns: 240px minmax(0, 1fr); }
+      .sidebar { padding: 26px 14px 20px; }
+      main { padding: 36px 24px; }
+      .doc-section { padding: 25px 24px; }
+      h2 { font-size: 23px; }
+    }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      .sidebar { position: static; height: auto; padding: 20px; gap: 18px; }
+      .brand { padding: 0; }
+      .mail-shortcut { margin: 0; }
+      .toc { overflow: visible; flex: none; }
+      .toc summary { margin: 0; padding: 4px 0; }
+      .toc[open] summary { margin-bottom: 12px; }
+      .toc nav { max-height: 52vh; overflow-y: auto; margin-top: 4px; }
+      .sidebar-footer { display: none; }
+      main { padding: 30px 16px 24px; }
+      .eyebrow { margin-bottom: 12px; }
+      h1 { font-size: 36px; }
+      h1 + p { font-size: 16px; }
+      .doc-section { padding: 24px 18px; }
+      .section-heading { gap: 10px; align-items: flex-start; }
+      h2 { font-size: 22px; }
+      h3 { font-size: 20px; }
+      .caution { padding: 16px; }
+      .hero-links a { flex: 1 1 180px; text-align: center; }
+      pre { padding: 16px; font-size: 12px; }
+      table { min-width: 600px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      body { background: white; font-size: 11pt; color: #111; }
+      .layout { display: block; }
+      .sidebar, .skip-link, .hero-links, .copy-button { display: none; }
+      main { padding: 0; max-width: none; }
+      .doc-section { border: 0; padding: 20px 0; }
+      .section-heading, h3 { break-after: avoid; }
+      .code-block, table tr { break-inside: avoid; }
+      .code-block, .code-toolbar { background: #f3f3f3; color: #111; }
+      pre { color: #111; white-space: pre-wrap; }
+      pre code { overflow-wrap: anywhere; }
+      .table-scroll { overflow: visible; }
+      table { min-width: 0; }
+      a { color: inherit; }
+    }
+  
+    .page-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+    .page-tabs a { padding: 9px 16px; border: 1px solid #c7d2df; border-radius: 7px; text-decoration: none; background: white; color: var(--ink); font-size: 14px; font-weight: 650; }
+    .page-tabs a[aria-current="page"] { background: var(--ink); border-color: var(--ink); color: white; }
+    @media print { .page-tabs { display: none; } }
+</style>
+  <link rel="stylesheet" href="ccdc-php/docs-theme.css">
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Remediation navigation">
+      <a class="brand" href="ccdc-php/ccdc_php.html"><span class="brand-mark" aria-hidden="true">&gt;_</span><span><strong>CCDC</strong><small>Blue Team · Remediation guide</small></span></a>
+      <a class="mail-shortcut" href="ccdc-php/validacion-apache.html">Apache2 validation <span aria-hidden="true">↗</span></a>
+      <details class="toc" open><summary>In this guide · 6 sections</summary><nav aria-label="Remediation sections"><a class="nav-link" href="#permissions"><span class="nav-number" aria-hidden="true">01</span><span>Phase 1: Fix filesystem permissions</span></a>
+<a class="nav-link" href="#command-injection"><span class="nav-number" aria-hidden="true">02</span><span>Challenge 1: Command injection</span></a>
+<a class="nav-link" href="#path-traversal"><span class="nav-number" aria-hidden="true">03</span><span>Challenge 2: Path traversal / LFI</span></a>
+<a class="nav-link" href="#file-uploads"><span class="nav-number" aria-hidden="true">04</span><span>Challenge 3: Arbitrary file uploads</span></a>
+<a class="nav-link" href="#cloned-scripts"><span class="nav-number" aria-hidden="true">05</span><span>Challenge 4: Fix patterns in cloned scripts</span></a>
+<a class="nav-link" href="#verification"><span class="nav-number" aria-hidden="true">06</span><span>Post-patch verification commands</span></a></nav></details>
+      <div class="sidebar-footer">Lab documentation<br><a href="ccdc-php/ccdc_php.html">Back to the lab guide ↗</a></div>
+    </aside>
+    <main id="contenido" tabindex="-1">
+      <div class="language-switch" role="group" aria-label="Idioma / Language"><button type="button" data-language="es" lang="es" aria-pressed="false">Español</button><button type="button" data-language="en" lang="en" aria-pressed="true">English</button></div>
+      <nav class="page-tabs" aria-label="Documentation pages"><a href="ccdc-php/ccdc_php.html">Lab guide</a><a href="ccdc-php/validacion-apache.html">Apache2 validation</a><a href="fixphp.html" aria-current="page">fixphp</a></nav>
+      <div class="hero" id="inicio">
+        <div class="eyebrow">Remediation / CCDC lab</div>
+        <h1>Remediation Guide: PHP Lab and Apache2 Permissions</h1>
+        <p>Review the vulnerabilities deployed under <code>/var/www/html/</code>, compare vulnerable and corrected PHP code, and apply the Linux and Apache2 permission fixes.</p>
+        <aside class="caution"><strong class="caution-title">Match the examples to your installed lab</strong><p>This guide uses <code>ping_tool.php</code>, <code>visor.php</code>, and <code>upload.php</code> with the upload field <code>avatar</code>. The repository's <code>instalador_de_laboratorio_php_vulnerable.sh</code> creates <code>ping-tool.php</code>, <code>visor-logs.php</code>, and <code>subir-archivo.php</code>, with the upload field <code>archivo</code>. Apply fixes to those installed files and update example URLs and field names consistently. Keep <code>diario.txt</code> and the report parameter <code>archivo</code> unchanged. The separate <code>instservices</code> script assigns <code>666</code> to its web files; these also need their write permissions corrected.</p></aside>
+      </div>
+      <section class="doc-section" aria-labelledby="permissions"><header class="section-heading"><span class="section-number" aria-hidden="true">01</span><h2 id="permissions">Phase 1: Fix filesystem permissions</h2></header>
+<p>The vulnerable lab uses <code>root:root</code> ownership with <code>777</code> permissions (<code>rwxrwxrwx</code>). This allows Apache&#x27;s <code>www-data</code> user to modify PHP source or create files in writable web directories.</p>
+<h3>Vulnerable state</h3>
+<p>These commands describe the insecure starting state; they are not remediation steps.</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-bash"># All users, including www-data, can read, write, and traverse these directories
+chmod 777 /var/www/html
+chmod 777 /var/www/html/*.php
+chmod -R 777 /var/www/html/uploads /var/www/html/reportes
+</code></pre></div>
+<h3>How to fix it</h3>
+<p>PHP source must not be writable by <code>www-data</code>. Only <code>/var/www/html/uploads</code> should allow group write access. Apache must separately prevent script execution in that directory.</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-bash"># 1. Assign root ownership and the www-data group to the web directory
+sudo chown -R root:www-data /var/www/html
+
+# 2. Directories: readable and traversable, writable only by root
+sudo find /var/www/html -type d -exec chmod 755 {} \;
+
+# 3. Files: readable by Apache, writable only by root
+sudo find /var/www/html -type f -exec chmod 644 {} \;
+
+# 4. Allow Apache to write only to the uploads directory
+sudo chown -R root:www-data /var/www/html/uploads
+sudo chmod 770 /var/www/html/uploads
+</code></pre></div>
+<p>These commands assume the lab directories exist. Read-only reports remain under <code>root</code> ownership. New files created by PHP will normally belong to <code>www-data</code>; that is acceptable inside the dedicated uploads directory. File mode <code>0640</code> removes executable bits but does not stop PHP interpretation over HTTP. Apply the Apache configuration in Challenge 3 as well.</p>
+</section>
+<section class="doc-section" aria-labelledby="command-injection"><header class="section-heading"><span class="section-number" aria-hidden="true">02</span><h2 id="command-injection">Challenge 1: Command injection</h2></header>
+<h3>Vulnerable code — ping_tool.php</h3>
+<p>The <code>$_POST[&#x27;ip&#x27;]</code> value is concatenated directly into <code>shell_exec()</code>, allowing additional commands through <code>;</code>, <code>&amp;&amp;</code>, or <code>|</code>.</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">&lt;?php
+$output = &quot;&quot;;
+if (isset($_POST[&#x27;ip&#x27;])) {
+    $target = $_POST[&#x27;ip&#x27;];
+    // VULNERABLE: direct concatenation into a shell command
+    $output = shell_exec(&quot;ping -c 3 &quot; . $target);
+}
+?&gt;
+</code></pre></div>
+<h3>Fixed code — /var/www/html/ping_tool.php</h3>
+<p>Validate the input as an IPv4 or IPv6 address with <code>filter_var()</code>, then quote the shell argument with <code>escapeshellarg()</code>. Reject non-string input before calling <code>trim()</code>.</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">&lt;?php
+// CHALLENGE 1 FIXED: network diagnostics without command injection
+$output = &quot;&quot;;
+if (isset($_POST[&#x27;ip&#x27;])) {
+    $target = is_string($_POST[&#x27;ip&#x27;]) ? trim($_POST[&#x27;ip&#x27;]) : &#x27;&#x27;;
+
+    // 1. Accept only a valid IP address
+    if (filter_var($target, FILTER_VALIDATE_IP) !== false) {
+        // 2. Quote the argument to prevent shell injection
+        $safe_target = escapeshellarg($target);
+        $output = shell_exec(&quot;ping -c 3 &quot; . $safe_target);
+    } else {
+        $output = &quot;Error: Invalid IP address format.&quot;;
+    }
+}
+?&gt;
+&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;title&gt;Network Diagnostics&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+    &lt;h3&gt;Check server connectivity&lt;/h3&gt;
+    &lt;form method=&quot;POST&quot;&gt;
+        &lt;label&gt;IP address: &lt;input type=&quot;text&quot; name=&quot;ip&quot; placeholder=&quot;8.8.8.8&quot;&gt;&lt;/label&gt;
+        &lt;button type=&quot;submit&quot;&gt;Ping&lt;/button&gt;
+    &lt;/form&gt;
+    &lt;pre&gt;&lt;?php echo htmlspecialchars($output ?? &#x27;&#x27;, ENT_QUOTES, &#x27;UTF-8&#x27;); ?&gt;&lt;/pre&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre></div>
+</section>
+<section class="doc-section" aria-labelledby="path-traversal"><header class="section-heading"><span class="section-number" aria-hidden="true">03</span><h2 id="path-traversal">Challenge 2: Path traversal / LFI</h2></header>
+<h3>Vulnerable code — visor.php</h3>
+<p>The <code>$_GET[&#x27;archivo&#x27;]</code> parameter is appended directly to the reports directory. A value such as <code>../../../../etc/passwd</code> escapes <code>/var/www/html/reportes/</code>.</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">&lt;?php
+$content = &quot;&quot;;
+if (isset($_GET[&#x27;archivo&#x27;])) {
+    $file = $_GET[&#x27;archivo&#x27;];
+    // VULNERABLE: ../ can escape the intended directory
+    $path = &quot;/var/www/html/reportes/&quot; . $file;
+    if (file_exists($path)) {
+        $content = file_get_contents($path);
+    } else {
+        $content = &quot;Report not found.&quot;;
+    }
+}
+?&gt;
+</code></pre></div>
+<h3>Fixed code — /var/www/html/visor.php</h3>
+<p>Use <code>basename()</code> to select a filename and <code>realpath()</code> to resolve it. Verify that the base directory exists and that the resolved file remains inside it, including after symbolic link resolution. The trailing directory separator prevents a sibling path from matching the prefix.</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">&lt;?php
+// CHALLENGE 2 FIXED: report viewer protected against path traversal
+$content = &quot;&quot;;
+$base_directory = realpath(&quot;/var/www/html/reportes&quot;);
+
+if (isset($_GET[&#x27;archivo&#x27;])) {
+    $target_path = false;
+    if ($base_directory !== false &amp;&amp; is_string($_GET[&#x27;archivo&#x27;])) {
+        $clean_name = basename($_GET[&#x27;archivo&#x27;]);
+        $target_path = realpath($base_directory . DIRECTORY_SEPARATOR . $clean_name);
+    }
+
+    if ($target_path !== false
+        &amp;&amp; strpos($target_path, $base_directory . DIRECTORY_SEPARATOR) === 0
+        &amp;&amp; is_file($target_path)
+        &amp;&amp; is_readable($target_path)) {
+        $content = file_get_contents($target_path);
+        if ($content === false) {
+            $content = &quot;Unable to read the report.&quot;;
+        }
+    } else {
+        http_response_code(403);
+        $content = &quot;Access denied or report not found.&quot;;
+    }
+}
+?&gt;
+&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;title&gt;Report Viewer&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+    &lt;h3&gt;View a system report&lt;/h3&gt;
+    &lt;a href=&quot;?archivo=diario.txt&quot;&gt;View the daily report&lt;/a&gt;
+    &lt;pre&gt;&lt;?php echo htmlspecialchars($content, ENT_QUOTES, &#x27;UTF-8&#x27;); ?&gt;&lt;/pre&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre></div>
+<h3>Fixed code — /var/www/html/download.php</h3>
+<p>Apply the same directory boundary check to downloads. Use an encoded filename in the response header so that an untrusted filename cannot introduce header syntax.</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">&lt;?php
+// FIXED: downloads limited to /var/www/html/reportes
+$base_directory = realpath(&quot;/var/www/html/reportes&quot;);
+
+if (isset($_GET[&#x27;file&#x27;])) {
+    $target_path = false;
+    if ($base_directory !== false &amp;&amp; is_string($_GET[&#x27;file&#x27;])) {
+        $clean_name = basename($_GET[&#x27;file&#x27;]);
+        $target_path = realpath($base_directory . DIRECTORY_SEPARATOR . $clean_name);
+    }
+
+    if ($target_path !== false
+        &amp;&amp; strpos($target_path, $base_directory . DIRECTORY_SEPARATOR) === 0
+        &amp;&amp; is_file($target_path)
+        &amp;&amp; is_readable($target_path)) {
+        header(&#x27;Content-Type: application/octet-stream&#x27;);
+        header(&quot;Content-Disposition: attachment; filename=\&quot;report\&quot;; filename*=UTF-8&#x27;&#x27;&quot;
+            . rawurlencode($clean_name));
+        readfile($target_path);
+        exit;
+    }
+
+    http_response_code(403);
+    echo &quot;Access denied or file not found.&quot;;
+} else {
+    echo &quot;Usage: download.php?file=diario.txt&quot;;
+}
+?&gt;
+</code></pre></div>
+<p>Keep the report directory and its files unwritable by Apache. The same containment check applies to <code>path-traversal.php</code>; preserve the parameter names used by that script.</p>
+</section>
+<section class="doc-section" aria-labelledby="file-uploads"><header class="section-heading"><span class="section-number" aria-hidden="true">04</span><h2 id="file-uploads">Challenge 3: Arbitrary file uploads</h2></header>
+<h3>Vulnerable code — upload.php</h3>
+<p>Trusting <code>$_FILES[&#x27;avatar&#x27;][&#x27;name&#x27;]</code> without checking the content allows a PHP script to be uploaded into <code>/var/www/html/uploads/</code>.</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">&lt;?php
+$message = &quot;&quot;;
+if (isset($_FILES[&#x27;avatar&#x27;])) {
+    $destination = &quot;uploads/&quot; . $_FILES[&#x27;avatar&#x27;][&#x27;name&#x27;];
+    // VULNERABLE: no extension or content-type validation
+    if (move_uploaded_file($_FILES[&#x27;avatar&#x27;][&#x27;tmp_name&#x27;], $destination)) {
+        $message = &quot;File uploaded to: &quot; . htmlspecialchars($destination);
+    }
+}
+?&gt;
+</code></pre></div>
+<h3>Fixed code — /var/www/html/upload.php</h3>
+<ol><li>Allow only <code>jpg</code>, <code>jpeg</code>, <code>png</code>, and <code>gif</code>, with a matching detected MIME type.</li><li>Inspect the file with <code>finfo_file()</code> and <code>getimagesize()</code> and require a successful upload.</li><li>Generate a random filename instead of retaining user-controlled names such as <code>shell.php.jpg</code>.</li></ol>
+<p>Image checks do not guarantee the absence of embedded PHP. The Apache execution block below remains required.</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">&lt;?php
+// CHALLENGE 3 FIXED: accept verified image uploads only
+$message = &quot;&quot;;
+if (isset($_FILES[&#x27;avatar&#x27;])) {
+    $file = $_FILES[&#x27;avatar&#x27;];
+    if (!is_array($file)
+        || ($file[&#x27;error&#x27;] ?? null) !== UPLOAD_ERR_OK
+        || !is_string($file[&#x27;tmp_name&#x27;] ?? null)
+        || !is_string($file[&#x27;name&#x27;] ?? null)
+        || !is_uploaded_file($file[&#x27;tmp_name&#x27;])) {
+        http_response_code(400);
+        $message = &quot;Upload failed or invalid upload request.&quot;;
+    } else {
+        $tmp_name = $file[&#x27;tmp_name&#x27;];
+        $extension = strtolower(pathinfo($file[&#x27;name&#x27;], PATHINFO_EXTENSION));
+
+        // 1. Match each allowed extension to its expected MIME type
+        $allowed_types = [
+            &#x27;jpg&#x27; =&gt; &#x27;image/jpeg&#x27;,
+            &#x27;jpeg&#x27; =&gt; &#x27;image/jpeg&#x27;,
+            &#x27;png&#x27; =&gt; &#x27;image/png&#x27;,
+            &#x27;gif&#x27; =&gt; &#x27;image/gif&#x27;,
+        ];
+
+        // 2. Inspect the actual file content
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $actual_mime = $finfo !== false ? finfo_file($finfo, $tmp_name) : false;
+        if ($finfo !== false) {
+            finfo_close($finfo);
+        }
+
+        // 3. Check for recognizable image dimensions
+        $image_info = @getimagesize($tmp_name);
+
+        if (isset($allowed_types[$extension])
+            &amp;&amp; $actual_mime === $allowed_types[$extension]
+            &amp;&amp; $image_info !== false
+            &amp;&amp; ($image_info[&#x27;mime&#x27;] ?? &#x27;&#x27;) === $actual_mime) {
+            // 4. Replace the user-supplied filename with a random name
+            $new_name = bin2hex(random_bytes(16)) . &quot;.&quot; . $extension;
+            $destination = &quot;/var/www/html/uploads/&quot; . $new_name;
+
+            if (move_uploaded_file($tmp_name, $destination)) {
+                // Restrict filesystem access; Apache blocks PHP interpretation separately
+                if (chmod($destination, 0640)) {
+                    $message = &quot;Image uploaded as: &quot; . $new_name;
+                } else {
+                    unlink($destination);
+                    http_response_code(500);
+                    $message = &quot;Unable to apply file permissions.&quot;;
+                }
+            } else {
+                http_response_code(500);
+                $message = &quot;Unable to save the image.&quot;;
+            }
+        } else {
+            http_response_code(400);
+            $message = &quot;Blocked: Only valid JPG, PNG, and GIF images are allowed.&quot;;
+        }
+    }
+}
+?&gt;
+&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;title&gt;Upload Avatar&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+    &lt;h3&gt;Upload a profile image&lt;/h3&gt;
+    &lt;form method=&quot;POST&quot; enctype=&quot;multipart/form-data&quot;&gt;
+        &lt;input type=&quot;file&quot; name=&quot;avatar&quot; accept=&quot;image/jpeg,image/png,image/gif&quot;&gt;
+        &lt;button type=&quot;submit&quot;&gt;Upload Image&lt;/button&gt;
+    &lt;/form&gt;
+    &lt;p&gt;&lt;?php echo htmlspecialchars($message, ENT_QUOTES, &#x27;UTF-8&#x27;); ?&gt;&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</code></pre></div>
+<h3>Block script execution in /uploads/ through Apache2</h3>
+<p>Place the following block in <code>/etc/apache2/sites-available/000-default.conf</code> inside the applicable virtual host. Apply it to the HTTPS virtual host too if the lab uses one. A <code>&lt;Directory&gt;</code> block cannot be placed in <code>.htaccess</code>; keeping the policy in root-owned server configuration also prevents the writable uploads directory from overriding it.</p>
+<p>This image-only policy denies other file types, disables directory listing and CGI, and forces allowed images through the static file handler. The conditional PHP directive adds protection when using mod_php. Existing PHP files should return <code>403</code>, rather than expose their source as plain text.</p>
+<div class="code-block"><div class="code-toolbar"><span>apache</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-apache">&lt;Directory &quot;/var/www/html/uploads&quot;&gt;
+    AllowOverride None
+    Options -ExecCGI -Indexes -Includes -FollowSymLinks -SymLinksIfOwnerMatch
+    AcceptPathInfo Off
+
+    &lt;IfModule php_module&gt;
+        php_admin_flag engine off
+    &lt;/IfModule&gt;
+
+    &lt;FilesMatch &quot;(?i)\.(jpe?g|png|gif)$&quot;&gt;
+        SetHandler default-handler
+        Require all granted
+    &lt;/FilesMatch&gt;
+    &lt;FilesMatch &quot;(?i)^(?!.*\.(jpe?g|png|gif)$).*$&quot;&gt;
+        Require all denied
+    &lt;/FilesMatch&gt;
+&lt;/Directory&gt;
+</code></pre></div>
+<p>Check Apache&#x27;s configuration before reloading:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-bash">sudo apache2ctl configtest &amp;&amp; sudo systemctl reload apache2
+</code></pre></div>
+<p>The policy assumes these uploads are public images. Verify it against the active virtual host and PHP handler configuration, especially if other rules override handlers. See the <a href="https://httpd.apache.org/docs/2.4/mod/core.html#directory">Apache Directory documentation</a> and <a href="https://httpd.apache.org/docs/2.4/mod/core.html#sethandler">SetHandler documentation</a>.</p>
+</section>
+<section class="doc-section" aria-labelledby="cloned-scripts"><header class="section-heading"><span class="section-number" aria-hidden="true">05</span><h2 id="cloned-scripts">Challenge 4: Fix patterns in cloned scripts</h2></header>
+<p>Apply these patterns to <code>basic-collection.php</code>, <code>path-traversal.php</code>, and the additional GitHub lab examples, using the actual input names and database API in each file.</p>
+<h3>1. Cross-site scripting (XSS)</h3>
+<p>Vulnerable:</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">echo &quot;Hello &quot; . $_GET[&#x27;name&#x27;];
+</code></pre></div>
+<p>Fixed for HTML text and quoted HTML attributes:</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">$name = is_string($_GET[&#x27;name&#x27;] ?? null) ? $_GET[&#x27;name&#x27;] : &#x27;&#x27;;
+echo &quot;Hello &quot; . htmlspecialchars($name, ENT_QUOTES, &#x27;UTF-8&#x27;);
+</code></pre></div>
+<p>Other output contexts, such as JavaScript or URLs, require context-appropriate handling.</p>
+<h3>2. SQL injection (PDO / MySQLi)</h3>
+<p>Vulnerable:</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">$id = $_GET[&#x27;id&#x27;];
+$result = $db-&gt;query(&quot;SELECT * FROM users WHERE id = &#x27;$id&#x27;&quot;);
+</code></pre></div>
+<p>Fixed using PDO prepared statements:</p>
+<div class="code-block"><div class="code-toolbar"><span>php</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-php">$id = filter_input(INPUT_GET, &#x27;id&#x27;, FILTER_VALIDATE_INT);
+if ($id === false || $id === null) {
+    http_response_code(400);
+    exit(&#x27;Invalid user ID.&#x27;);
+}
+$stmt = $db-&gt;prepare(&quot;SELECT * FROM users WHERE id = :id&quot;);
+$stmt-&gt;execute([&#x27;:id&#x27; =&gt; $id]);
+$result = $stmt-&gt;fetchAll();
+</code></pre></div>
+<p>This example assumes <code>$db</code> is a PDO connection and IDs are integers. MySQLi uses its own <code>prepare()</code> and <code>bind_param()</code> API rather than PDO named placeholders.</p>
+<h3>3. Disable dangerous functions in php.ini (optional)</h3>
+<p>If no scored service needs to execute system commands from PHP, edit the active Apache PHP configuration under <code>/etc/php/&lt;version&gt;/apache2/php.ini</code>:</p>
+<div class="code-block"><div class="code-toolbar"><span>ini</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-ini">disable_functions = exec,passthru,shell_exec,system,proc_open,popen,pcntl_exec
+expose_php = Off
+allow_url_fopen = Off
+allow_url_include = Off
+</code></pre></div>
+<p>If the validator or scorebot requires real ping functionality, keep <code>shell_exec</code> enabled and apply the Challenge 1 code fix. Disabling URL file access may also affect legitimate integrations. With PHP-FPM, use the active FPM configuration and reload the matching FPM service.</p>
+<p>The lab&#x27;s <code>/etc/php/&lt;version&gt;/apache2/conf.d/99-ccdc-misconfig.ini</code> explicitly enables <code>expose_php</code> and error display. Remove those conflicting overrides or update that file too; a change in <code>php.ini</code> alone can be overridden by files loaded afterward. Reload the active PHP runtime after changes.</p>
+</section>
+<section class="doc-section" aria-labelledby="verification"><header class="section-heading"><span class="section-number" aria-hidden="true">06</span><h2 id="verification">Post-patch verification commands</h2></header>
+<p>Run these checks after applying the fixes to confirm that legitimate functionality remains available and the attack inputs are rejected. Replace the example IP with your lab server&#x27;s address.</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-bash">export ipphpserver=&quot;192.168.1.100&quot;
+
+# 1. Legitimate ping works (SLA OK); command injection is rejected
+curl -s -X POST &quot;http://$ipphpserver/ping_tool.php&quot; -d &quot;ip=8.8.8.8&quot; | grep &quot;bytes from&quot;
+curl -s -X POST &quot;http://$ipphpserver/ping_tool.php&quot; -d &quot;ip=127.0.0.1; id&quot;
+
+# 2. The daily report opens (SLA OK); traversal cannot read /etc/passwd
+curl -s &quot;http://$ipphpserver/visor.php?archivo=diario.txt&quot;
+curl -s &quot;http://$ipphpserver/visor.php?archivo=../../../../etc/passwd&quot;
+
+# 3. PHP file uploads are rejected
+echo &#x27;&lt;?php system(&quot;id&quot;); ?&gt;&#x27; &gt; test_shell.php
+curl -s -F &quot;avatar=@test_shell.php&quot; &quot;http://$ipphpserver/upload.php&quot;
+</code></pre></div>
+<p>Use a reachable IP permitted by the isolated lab network if <code>8.8.8.8</code> is unavailable. A failed external ping alone does not establish whether injection is fixed. The viewer should show the daily report, and the traversal request should return an access-denied response without system file contents.</p>
+<p>Also test a real image upload and confirm that Apache blocks an existing PHP test file in the uploads directory:</p>
+<div class="code-block"><div class="code-toolbar"><span>bash</span><button class="copy-button" type="button" aria-label="Copy code">Copy</button></div><pre><code class="language-bash"># Replace avatar.png with a real, local image
+curl -sS -F &quot;avatar=@avatar.png&quot; &quot;http://$ipphpserver/upload.php&quot;
+
+# On the Apache server: create an inert PHP execution marker
+printf &#x27;%s\n&#x27; &#x27;&lt;?php echo &quot;UPLOAD_EXECUTION_MARKER&quot;; ?&gt;&#x27; | sudo tee /var/www/html/uploads/execution-check.php &gt;/dev/null
+sudo chmod 644 /var/www/html/uploads/execution-check.php
+
+# On the administration machine: expect 403, with no execution marker or PHP source
+curl -i &quot;http://$ipphpserver/uploads/execution-check.php&quot;
+</code></pre></div>
+<p>Fetch the generated image URL returned by a successful upload to confirm it is served. Run the marker setup commands on the server and the HTTP request on the administration machine where <code>$ipphpserver</code> is set. Restore the disposable lab snapshot after completing the exercise.</p>
+</section>
+      <footer class="page-footer"><a href="ccdc-php/ccdc_php.html">← Lab guide</a><a href="#inicio">Back to top ↑</a></footer>
+    </main>
+  </div>
+  <p class="copy-status" role="status" aria-live="polite"></p>
+  <script>
+    const toc = document.querySelector('.toc');
+    const mobile = window.matchMedia('(max-width: 760px)');
+    const syncNavigation = () => { toc.open = !mobile.matches; };
+    syncNavigation();
+    mobile.addEventListener('change', syncNavigation);
+    document.querySelectorAll('.toc a').forEach(link => link.addEventListener('click', () => {
+      if (mobile.matches) toc.open = false;
+    }));
+
+    const links = Array.from(document.querySelectorAll('.nav-link'));
+    const targets = links.map(link => document.getElementById(link.hash.slice(1)));
+    let scheduled = false;
+    function updateActiveSection() {
+      let active = -1;
+      targets.forEach((target, index) => { if (target.getBoundingClientRect().top <= 160) active = index; });
+      links.forEach((link, index) => {
+        link.classList.toggle('is-active', index === active);
+        if (index === active) link.setAttribute('aria-current', 'location');
+        else link.removeAttribute('aria-current');
+      });
+      scheduled = false;
+    }
+    window.addEventListener('scroll', () => {
+      if (!scheduled) { scheduled = true; requestAnimationFrame(updateActiveSection); }
+    }, { passive: true });
+    updateActiveSection();
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        try { await navigator.clipboard.writeText(text); return; } catch (_) { /* Local-file fallback below. */ }
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.cssText = 'position:fixed;top:0;left:-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Copy unavailable');
+    }
+    document.querySelectorAll('.copy-button').forEach(button => {
+      button.addEventListener('click', async () => {
+        const code = button.closest('.code-block').querySelector('pre code');
+        try {
+          await copyText(code.textContent);
+          button.textContent = window.docsText('copied');
+          document.querySelector('.copy-status').textContent = window.docsText('copySuccess');
+        } catch (_) {
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          button.textContent = window.docsText('selected');
+          document.querySelector('.copy-status').textContent = window.docsText('copyFallback');
+        }
+        button.focus({ preventScroll: true });
+        setTimeout(() => { button.textContent = window.docsText('copy'); }, 2200);
+      });
+    });
+  </script>
+  <script src="ccdc-php/docs-i18n.js"></script>
+</body>
+</html>

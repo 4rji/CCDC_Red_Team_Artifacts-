@@ -5,6 +5,8 @@ herramientas de observación para prácticas autorizadas de CCDC. Los nombres
 `redhavi*` se conservan en los scripts históricos para no romper despliegues y
 material de clase; el monitor web se llama `ccdc-canary-monitor`.
 
+Versión navegable por secciones: [ccdc_php.html](ccdc-php/ccdc_php.html).
+
 > [!CAUTION]
 > Los seeders crean usuarios débiles, persistencia, claves SSH, contenido web
 > vulnerable y servicios inseguros. Úsalos únicamente en máquinas virtuales
@@ -29,7 +31,7 @@ material de clase; el monitor web se llama `ccdc-canary-monitor`.
 | `ccdc-canary-monitor` | Python 3 | Servidor de check-ins y dashboard web para el instructor. | Solo su JSON de estado |
 | `ecomredhavi` | Ubuntu/Debian | Laboratorio Apache, PHP y MySQL con configuraciones débiles e indicadores inertes. | Sí |
 | `ecomredhavimysql` | Ubuntu/Debian | Variante explícita del laboratorio web/MySQL con headers débiles y contraseñas conocidas. | Sí |
-| `instservices` | Ubuntu Server 24.04 | Instala Postfix, Dovecot, Apache y PHP con fallos intencionales. | Sí |
+| `instservices` | Ubuntu Server 24.04 | Instala Postfix, Dovecot, 12 usuarios de correo, Apache y PHP con fallos intencionales. | Sí |
 | `redhavi-apolloWin.ps1` | Windows | Artefacto opcional de tarea programada para un payload Apollo autorizado. | Sí |
 | `redhavi-poseidon` | Linux/systemd | Artefacto opcional de servicio y timer para un payload Poseidon autorizado. | Sí |
 | `redhavi-task.md` | Todas | Hoja de investigación que se entrega al Blue Team. | No |
@@ -209,6 +211,91 @@ sudo ./instservices \
 En automatización controlada se puede añadir `--yes`. Instala SMTP/25,
 IMAP/143, HTTP/80 y HTTPS/443, además de permisos débiles, divulgación de
 versiones, listado de directorios y una XSS reflejada de laboratorio.
+
+También crea 12 usuarios locales legítimos: `ana.garcia`, `carlos.lopez`,
+`maria.rodriguez`, `jose.martinez`, `laura.hernandez`, `pedro.sanchez`,
+`sofia.ramirez`, `diego.torres`, `elena.flores`, `miguel.rivera`, `lucia.gomez`
+y `andres.diaz`. Cada cuenta nueva recibe una contraseña generada durante la
+instalación y un buzón `~/Maildir` con las carpetas `cur`, `new` y `tmp`.
+Las contraseñas iniciales se guardan en `/root/instservices-mail-users.tsv`
+en el servidor; consulta el archivo con:
+
+```bash
+sudo cat /root/instservices-mail-users.tsv
+```
+
+Para leer correo, conecta un cliente IMAP al servidor en el puerto `143`,
+usando el nombre de usuario sin dominio (por ejemplo, `ana.garcia`) y su
+contraseña. La dirección de correo es `usuario@DOMINIO`, con el dominio
+seleccionado mediante `--mail-domain`. Dovecot ya forma parte de la instalación.
+Al repetir el instalador, se conservan las cuentas, contraseñas y mensajes
+existentes. El archivo registra solo las contraseñas iniciales de las cuentas
+creadas por el instalador.
+Los permisos y las vulnerabilidades intencionales del laboratorio se mantienen.
+
+### Leer correo desde CLI
+
+Ejecuta los comandos de lectura desde el servidor o desde otro equipo de la
+red del laboratorio. Sustituye `IP_DEL_SERVIDOR` por la IP de la VM; si estás
+en el propio servidor, puedes usar `127.0.0.1`. En Ubuntu, instala el cliente
+si hace falta:
+
+```bash
+sudo apt-get install -y curl
+```
+
+Usa una de las 12 cuentas, por ejemplo `ana.garcia`, y consulta su contraseña
+inicial en `/root/instservices-mail-users.tsv` en el servidor. Al indicar solo
+el usuario con `--user`, curl solicita la contraseña en la terminal.
+Estos ejemplos usan IMAP/143 sin TLS, tal como permite el laboratorio.
+
+**1. Listar los buzones disponibles:**
+
+```bash
+curl --silent --show-error --user ana.garcia \
+  --url 'imap://IP_DEL_SERVIDOR:143/'
+```
+
+**2. Buscar los identificadores (UID) de los mensajes en INBOX:**
+
+```bash
+curl --silent --show-error --user ana.garcia \
+  --url 'imap://IP_DEL_SERVIDOR:143/INBOX' \
+  --request 'UID SEARCH ALL'
+```
+
+Una respuesta como `* SEARCH 1 2` indica que existen los UID `1` y `2`.
+Si devuelve `* SEARCH` sin números, el buzón está vacío.
+
+**3. Leer un mensaje completo, incluidos encabezados y cuerpo:**
+
+```bash
+curl --silent --show-error --user ana.garcia \
+  --url 'imap://IP_DEL_SERVIDOR:143/INBOX/;UID=1'
+```
+
+Sustituye `1` por uno de los UID que devolvió la búsqueda; los UID no tienen
+por qué ser consecutivos. Mantén las comillas de la URL, porque contiene `;`.
+La [documentación de curl sobre IMAP](https://curl.se/docs/url-syntax.html#imap)
+describe estas búsquedas y la lectura por UID.
+
+**4. Enviar un correo de prueba local para tener algo que leer:**
+
+Ejecuta esto en el servidor de correo. Si usaste otro `--mail-domain`, cambia
+`ccdcteam.com` en las dos direcciones:
+
+```bash
+printf '%s\n' \
+  'From: carlos.lopez@ccdcteam.com' \
+  'To: ana.garcia@ccdcteam.com' \
+  'Subject: Prueba de correo CCDC' \
+  '' \
+  'Hola Ana, este es un mensaje de prueba del laboratorio.' |
+  sudo -u carlos.lopez /usr/sbin/sendmail -i -t
+```
+
+Después repite la búsqueda y lectura de INBOX. Postfix entrega el mensaje
+al Maildir de Ana y Dovecot permite leerlo por IMAP.
 
 ## Artefactos opcionales Apollo y Poseidon
 
