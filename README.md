@@ -25,9 +25,12 @@ Versión navegable por secciones: [ccdc_php.html](ccdc-php/ccdc_php.html).
 | `redhavi-check-fedora` | Fedora | Evalúa la limpieza del escenario Fedora. | No |
 | `redhavi-check-shc` | Linux | Fuente adaptada para compilar el checker Linux con SHC. | No |
 | `redhavi-check-federo-shc` | Fedora | Fuente SHC del checker Fedora; el nombre `federo` es histórico. | No |
-| `redhaviwin.ps1` | Windows | Prepara el escenario Windows con cuentas, persistencia, web y check-ins. | Sí |
-| `redhavi-checkWin.ps1` | Windows | Evalúa la limpieza del escenario Windows. | No |
+| `windows-dos-combined/redhaviwin.ps1` | Windows | Prepara el escenario Windows con cuentas, persistencia, web y check-ins. | Sí |
+| `windows-dos-combined/redhavi-checkWin.ps1` | Windows | Proporciona los 11 controles Redhavi usados por el checker combinado. | No |
 | `redhavi-checkWin-ps2exe.ps1` | Windows | Empaqueta el checker de PowerShell como EXE mediante PS2EXE. | Crea un archivo |
+| `windows-dos-combined/dos.ps1` | Windows | Prepara el escenario completo y añade `ccdcscoring.exe` con su tarea programada. | Sí |
+| `windows-dos-combined/dos-checkWin.ps1` | Windows | Evalúa los 11 controles Redhavi y los 2 artefactos adicionales de `dos.ps1`. | No |
+| `windows-dos-combined/dos-checkWin-ps2exe.ps1` | Windows | Empaqueta el checker combinado como un EXE autocontenido mediante PS2EXE. | Crea un archivo |
 | `ccdc-canary-monitor` | Python 3 | Servidor de check-ins y dashboard web para el instructor. | Solo su JSON de estado |
 | `ecomredhavi` | Ubuntu/Debian | Laboratorio Apache, PHP y MySQL con configuraciones débiles e indicadores inertes. | Sí |
 | `ecomredhavimysql` | Ubuntu/Debian | Variante explícita del laboratorio web/MySQL con headers débiles y contraseñas conocidas. | Sí |
@@ -160,25 +163,24 @@ sudo ./redhavi-check-fedora
 
 ## Windows
 
-Ejecuta PowerShell 5.1 de 64 bits como Administrador. El seeder instala su
-check-in canary cada tres minutos y acepta una URL específica:
+El escenario combinado está en `windows-dos-combined/`. Ejecuta PowerShell 5.1
+de 64 bits como Administrador:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\redhaviwin.ps1 -CanaryUrl 'http://IP_DEL_MONITOR:8081/checkin'
-.\redhaviwin.ps1 -Verify
-.\redhavi-checkWin.ps1
+Set-Location .\windows-dos-combined
+.\dos.ps1
+.\dos-checkWin.ps1
 ```
 
-Para compilar el checker como EXE:
+Para crear y ejecutar el checker autocontenido:
 
 ```powershell
-.\redhavi-checkWin-ps2exe.ps1
-.\Red_team_artifacts.exe
+.\dos-checkWin-ps2exe.ps1 -Force
+.\Dos_team_artifacts.exe
 ```
 
-Usa `-Force` en el compilador solamente cuando quieras reemplazar
-intencionalmente un EXE existente.
+Consulta [las instrucciones completas del escenario combinado](windows-dos-combined/README.md).
 
 ## Laboratorios web, base de datos y servicios
 

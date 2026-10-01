@@ -165,13 +165,13 @@ $PSVersionTable.PSVersion
 [Environment]::Is64BitProcess
 ```
 
-The last command should return `True`. Keep these files together:
+The last command should return `True`. The combined Windows scenario is self-contained in:
 
-- `redhavi-checkWin.ps1`
-- `redhavi-checkWin-ps2exe.ps1`
+- `windows-dos-combined/`
+- `redhavi-checkWin-ps2exe.ps1` for the legacy standalone checker build
 - `redhavi-apolloWin.ps1` when using the optional Apollo1 exercise artifact
 
-The first is the checker; the second packages it as an executable. The Apollo1 script is independent from the checker and may be run after the main Windows scenario has already been prepared. These scripts use Windows administrative cmdlets, so run them from an elevated terminal on the exercise VM.
+See `windows-dos-combined/README.md` for the short combined workflow. The Apollo1 script is independent and may be run after the main Windows scenario has already been prepared. These scripts use Windows administrative cmdlets, so run them from an elevated terminal on the exercise VM.
 
 ## 7. Compile the Windows checker into an EXE
 
@@ -187,11 +187,10 @@ For an explicit output directory:
 
 ```powershell
 .\redhavi-checkWin-ps2exe.ps1 `
-    -SourcePath .\redhavi-checkWin.ps1 `
     -OutputPath .\build\Red_team_artifacts.exe
 ```
 
-If that exact output already exists and you intend to replace it, repeat the command with `-Force`.
+Choose another output path if that exact legacy build already exists.
 
 PS2EXE packages PowerShell 5.1-compatible code into a .NET executable. It does not provide cryptographic source protection. See the [PS2EXE documentation](https://github.com/MScholtes/PS2EXE).
 
@@ -215,7 +214,7 @@ Compare the hash with the build machine's output. If you built into `build`, the
 For the script version, run this from the source directory in an elevated Windows PowerShell terminal:
 
 ```powershell
-& .\redhavi-checkWin.ps1
+& .\windows-dos-combined\redhavi-checkWin.ps1
 $checkerExit = $LASTEXITCODE
 Write-Host "Checker exit code: $checkerExit"
 ```
@@ -224,7 +223,55 @@ The default state file is `%ProgramData%\redhavi\state-win.json`. This revision 
 
 The Windows checker evaluates accounts, scheduled tasks, registry persistence, the scenario SSH key, file attributes, web content, and optional insecure features. The checker and monitor do not require Apache.
 
-## 9. Install the optional Apollo1 scheduled-task artifact
+## 9. Install and check the independent DOS Windows scenario
+
+`dos.ps1` prepares the complete Redhavi Windows scenario and then adds `ccdcscoring.exe` with the `Redhavi-ccdcscoring` scheduled task. Its combined checker runs the original 11 Redhavi checks plus 2 DOS checks. Do not evaluate this combined scenario with `Red_team_artifacts.exe`.
+
+Keep the entire `windows-dos-combined` folder together. On the disposable exercise VM, run the seeder from an elevated Windows PowerShell 5.1 terminal:
+
+```powershell
+Set-Location .\windows-dos-combined
+.\dos.ps1
+```
+
+Supply `-ExpectedSha256` with the 64-character SHA-256 distributed by the instructor whenever possible.
+
+A successful combined run requires both `%ProgramData%\redhavi\state-win.json` and `%ProgramData%\redhavi\dos-state-win.json`. The DOS marker uses scenario version `2`, status `ready`, and `13` expected checks. The combined workflow also accepts a Redhavi marker whose status is `incomplete` only when its recorded step is `post-validation`; the checker then reports the actual state of all 13 controls instead of denying the whole score. Preserve both markers while remediating the machine.
+
+Run the readable checker with:
+
+```powershell
+& .\dos-checkWin.ps1
+$checkerExit = $LASTEXITCODE
+Write-Host "Checker exit code: $checkerExit"
+```
+
+With all 13 artifacts present, the initial score should be `0%`. If Redhavi reached post-validation with unresolved seed checks, the initial score may already include the corresponding absent or clean artifacts. The seeder's cleanup mode removes only its two additional DOS artifacts:
+
+```powershell
+.\dos.ps1 -Remove
+.\dos-checkWin.ps1
+```
+
+To package the dedicated checker:
+
+```powershell
+.\dos-checkWin-ps2exe.ps1
+```
+
+This produces `Dos_team_artifacts.exe`. To choose another location or replace an existing build intentionally:
+
+```powershell
+.\dos-checkWin-ps2exe.ps1 `
+    -OutputPath .\build\Dos_team_artifacts.exe `
+    -Force
+```
+
+The packager embeds the compatible `redhavi-checkWin.ps1` into the executable. Running the readable `dos-checkWin.ps1` directly requires the compatible original checker beside it.
+
+The short instructions and a complete validated initial result are in `windows-dos-combined/README.md`.
+
+## 10. Install the optional Apollo1 scheduled-task artifact
 
 Use this only on a disposable Windows VM in the isolated exercise network. The helper downloads `apollo1.exe` from the external server IP configured by `-DownloadUrl`, stores it at `C:\ProgramData\redhavi\apollo1.exe`, and creates the visible scheduled task `Redhavi-Apollo1`. The task runs as `SYSTEM` every three minutes. If the previous process is still running, Task Scheduler does not start a duplicate instance.
 
@@ -279,7 +326,7 @@ To remove both the scheduled task and the installed executable:
 
 This optional artifact does not change the existing `redhaviwin.ps1` state marker. The current `redhavi-checkWin.ps1` checker does not score Apollo1 cleanup.
 
-## 10. Install the optional Poseidon systemd artifact
+## 11. Install the optional Poseidon systemd artifact
 
 Use this only on an authorized disposable Linux VM in the isolated exercise network. `redhavi-poseidon` downloads a newly generated Mythic Poseidon payload from the external server configured by `--download-url`, installs it as `/var/lib/redhavi/poseidon.bin`, and creates `redhavi-poseidon.service` and `redhavi-poseidon.timer`.
 
@@ -322,7 +369,7 @@ sudo ./redhavi-poseidon --remove
 
 This optional artifact does not change the Linux scenario state marker. The current Linux cleanup checkers do not score Poseidon cleanup.
 
-## 11. Start the canary monitor
+## 12. Start the canary monitor
 
 The monitor needs Python 3 and uses only the standard library. It does not need compilation or pip packages.
 
@@ -351,7 +398,7 @@ py -3 .\ccdc-canary-monitor --bind 127.0.0.1 --port 8081 --clean-threshold 240 -
 
 This Windows command requires Python 3 and the Python launcher. If your installation exposes only `python`, use that command after confirming `python --version` reports Python 3.
 
-## 12. Test a harmless check-in
+## 13. Test a harmless check-in
 
 Leave the monitor running and open a second terminal on the same machine.
 
@@ -377,7 +424,7 @@ The Windows scenario uses a three-minute check-in interval, while the monitor's 
 
 Green means no recent check-in. It can also mean a stopped VM, a network problem, or a manually added machine that has never checked in. Confirm cleanup with the host checker and investigation evidence. Machines behind the same NAT address may appear as a single client.
 
-## 13. Run the exercise and record results
+## 14. Run the exercise and record results
 
 1. Record the initial checker output on each prepared VM.
 2. Give students the English investigation handout, `redhavi-task.md`.
@@ -395,7 +442,7 @@ Green means no recent check-in. It can also mean a stopped VM, a network problem
 
 The Linux and Windows checkers explicitly report infrastructure errors. The Fedora checker has fewer such distinctions; inspect its messages as well as the score. A passing rubric is not a comprehensive guarantee that the system is uncompromised.
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |

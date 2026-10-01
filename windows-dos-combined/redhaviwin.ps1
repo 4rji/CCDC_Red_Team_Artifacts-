@@ -416,12 +416,44 @@ function Setup-PeriodicCanaryTask {
         -IntervalMinutes $script:CanaryIntervalMinutes
 }
 
-function Get-AdministratorsGroup {
-    $group = Get-CimInstance Win32_Group -Filter "LocalAccount=True AND SID='S-1-5-32-544'" | Select-Object -First 1
-    if (-not $group) {
-        throw "The local Administrators group (S-1-5-32-544) was not found."
+function Get-AdsiAdministratorsGroup {
+    $sid = [System.Security.Principal.SecurityIdentifier]::new("S-1-5-32-544")
+    $accountName = $sid.Translate([System.Security.Principal.NTAccount]).Value
+    $groupName = ($accountName -split "\\", 2)[-1]
+
+    try {
+        $group = [ADSI]"WinNT://$env:COMPUTERNAME/$groupName,group"
+        $null = $group.Name
+        return $group
+    } catch {
+        throw "Could not bind to the local Administrators group by SID: $($_.Exception.Message)"
     }
-    return $group.Name
+}
+
+function Get-AdsiLocalUser {
+    param([Parameter(Mandatory)]$LocalUser)
+
+    $accountName = $LocalUser.SID.Translate([System.Security.Principal.NTAccount]).Value
+    $principalPath = "WinNT://$($accountName.Replace('\', '/')),user"
+    $principal = [ADSI]$principalPath
+    $null = $principal.Name
+    return $principal
+}
+
+function Test-AdministratorsMembership {
+    param([Parameter(Mandatory)]$LocalUser)
+
+    $group = Get-AdsiAdministratorsGroup
+    $principal = Get-AdsiLocalUser $LocalUser
+    return [bool]$group.psbase.Invoke("IsMember", $principal.Path)
+}
+
+function Add-AdministratorsMembership {
+    param([Parameter(Mandatory)]$LocalUser)
+
+    $group = Get-AdsiAdministratorsGroup
+    $principal = Get-AdsiLocalUser $LocalUser
+    $group.psbase.Invoke("Add", $principal.Path)
 }
 
 function Ensure-LabUser {
@@ -442,12 +474,9 @@ function Ensure-LabUser {
         New-LocalUser -Name $Name -Password $securePassword -Description "Redhavi CCDC lab account" | Out-Null
     }
 
-    $administrators = Get-AdministratorsGroup
     $user = Get-LocalUser -Name $Name
-    $isMember = Get-LocalGroupMember -Group $administrators -ErrorAction Stop |
-        Where-Object { $_.SID -eq $user.SID }
-    if (-not $isMember) {
-        Add-LocalGroupMember -Group $administrators -Member $Name
+    if (-not (Test-AdministratorsMembership $user)) {
+        Add-AdministratorsMembership $user
     }
 
     if ($MustChangePassword) {
@@ -567,9 +596,7 @@ function Test-LabUserSeeded {
     if (-not $user -or -not $user.Enabled) {
         return $false
     }
-    $administrators = Get-AdministratorsGroup
-    return [bool](Get-LocalGroupMember -Group $administrators -ErrorAction Stop |
-        Where-Object { $_.SID -eq $user.SID })
+    return Test-AdministratorsMembership $user
 }
 
 function Test-RefreshTaskSeeded {

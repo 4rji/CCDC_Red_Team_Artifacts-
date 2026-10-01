@@ -104,7 +104,15 @@ function Read-ScenarioState {
         Stop-Verification "Incompatible scenario version."
     }
     if ($state.status -ne "ready") {
-        Stop-Verification "Provisioning is marked as incomplete; no points will be awarded."
+        $allowIncomplete = Get-Variable -Name AllowIncompleteScenarioState -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        $reachedPostValidation = (
+            $state.PSObject.Properties.Name -contains "step" -and
+            $state.status -eq "incomplete" -and
+            $state.step -eq "post-validation"
+        )
+        if (-not $allowIncomplete -or -not $reachedPostValidation) {
+            Stop-Verification "Provisioning is marked as incomplete; no points will be awarded."
+        }
     }
     if ([int]$state.expected_checks -ne $script:ExpectedChecks) {
         Stop-Verification "The state marker does not declare $($script:ExpectedChecks) checks."
@@ -115,7 +123,7 @@ function Read-ScenarioState {
 
 function Assert-RequiredCommands {
     foreach ($commandName in @(
-        "Get-LocalUser", "Get-LocalGroupMember", "Get-ScheduledTask",
+        "Get-LocalUser", "Get-ScheduledTask",
         "Get-WindowsOptionalFeature"
     )) {
         if (-not (Get-Command $commandName -ErrorAction SilentlyContinue)) {
@@ -124,17 +132,35 @@ function Assert-RequiredCommands {
     }
 }
 
-function Get-AdministratorsGroup {
+function Get-AdsiAdministratorsGroup {
     try {
-        $group = Get-CimInstance Win32_Group -Filter "LocalAccount=True AND SID='S-1-5-32-544'" |
-            Select-Object -First 1
+        $sid = [System.Security.Principal.SecurityIdentifier]::new("S-1-5-32-544")
+        $accountName = $sid.Translate([System.Security.Principal.NTAccount]).Value
+        $groupName = ($accountName -split "\\", 2)[-1]
+        $group = [ADSI]"WinNT://$env:COMPUTERNAME/$groupName,group"
+        $null = $group.Name
+        return $group
     } catch {
-        Throw-CheckError "Could not query the Administrators group: $($_.Exception.Message)"
+        Throw-CheckError "Could not bind to the local Administrators group by SID: $($_.Exception.Message)"
     }
-    if (-not $group) {
-        Throw-CheckError "The Administrators group (S-1-5-32-544) was not found."
+}
+
+function Test-AdministratorsMembership {
+    param([Parameter(Mandatory)]$LocalUser)
+
+    try {
+        $accountName = $LocalUser.SID.Translate([System.Security.Principal.NTAccount]).Value
+        $principalPath = "WinNT://$($accountName.Replace('\', '/')),user"
+        $principal = [ADSI]$principalPath
+        $null = $principal.Name
+        $group = Get-AdsiAdministratorsGroup
+        return [bool]$group.psbase.Invoke("IsMember", $principal.Path)
+    } catch {
+        if ($_.Exception.Message.StartsWith("INFRA::")) {
+            throw
+        }
+        Throw-CheckError "Could not query group membership for $($LocalUser.Name): $($_.Exception.Message)"
     }
-    return $group.Name
 }
 
 function Assert-LabUserClean {
@@ -154,15 +180,9 @@ function Assert-LabUserClean {
         $reasons.Add("the account is still enabled")
     }
 
-    $administrators = Get-AdministratorsGroup
-    try {
-        $isAdministrator = [bool](Get-LocalGroupMember -Group $administrators -ErrorAction Stop |
-            Where-Object { $_.SID -eq $user.SID })
-    } catch {
-        Throw-CheckError "Could not query group membership for ${Name}: $($_.Exception.Message)"
-    }
+    $isAdministrator = Test-AdministratorsMembership $user
     if ($isAdministrator) {
-        $reasons.Add("the account is still a member of $administrators")
+        $reasons.Add("the account is still a member of the local Administrators group")
     }
 
     if ($reasons.Count -gt 0) {
@@ -448,13 +468,16 @@ function Invoke-RedhaviCheck {
     Show-SummaryAndSetResult
 }
 
-try {
-    Invoke-RedhaviCheck
-} catch {
-    $message = $_.Exception.Message
-    if ($message.StartsWith("FATAL::")) {
-        $message = $message.Substring(7)
+$libraryOnly = Get-Variable -Name RedhaviCheckLibraryOnly -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+if (-not $libraryOnly) {
+    try {
+        Invoke-RedhaviCheck
+    } catch {
+        $message = $_.Exception.Message
+        if ($message.StartsWith("FATAL::")) {
+            $message = $message.Substring(7)
+        }
+        Write-Host "[ERROR] $message" -ForegroundColor Red
+        Set-VerificationResult 2
     }
-    Write-Host "[ERROR] $message" -ForegroundColor Red
-    Set-VerificationResult 2
 }
