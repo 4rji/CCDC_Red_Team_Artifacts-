@@ -8,6 +8,7 @@ DRY_RUN=1
 ASSUME_YES=0
 OS="unknown"
 ADMIN_GROUP=""
+SCRIPT_NAME="${REDHAVI_SCRIPT_NAME:-redhavi-fedora}"
 
 WEB_REPO_URL="${WEB_REPO_URL:-https://github.com/banago/simple-php-website.git}"
 INDEX_URL="${INDEX_URL:-https://raw.githubusercontent.com/4rji/ccdc/main/index.php}"
@@ -19,8 +20,8 @@ CANARY_SERVICE="redhavi-canary.service"
 CANARY_TIMER="redhavi-canary.timer"
 
 usage() {
-    cat <<'EOF'
-Usage: redhavi-fedora [--apply] [--yes]
+    cat <<EOF
+Usage: ${SCRIPT_NAME} [--apply] [--yes]
 
 Options:
   --apply    Apply real changes. Without this option, only print actions.
@@ -100,7 +101,7 @@ detect_os() {
     fi
 
     case "$OS" in
-        debian|ubuntu|kali|centos|rhel|ol|fedora|arch)
+        debian|ubuntu|kali|centos|rhel|ol|fedora|rocky|arch)
             ;;
         *)
             die "Unsupported operating system for automatic installation: $OS"
@@ -117,7 +118,7 @@ package_installed() {
         debian|ubuntu|kali)
             dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'
             ;;
-        centos|rhel|ol|fedora)
+        centos|rhel|ol|fedora|rocky)
             rpm -q "$pkg" >/dev/null 2>&1
             ;;
         arch)
@@ -141,7 +142,7 @@ install_package() {
         centos|rhel|ol)
             run yum install -y "$pkg"
             ;;
-        fedora)
+        fedora|rocky)
             run dnf install -y "$pkg"
             ;;
         arch)
@@ -163,7 +164,7 @@ install_packages() {
         centos|rhel|ol)
             bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd")
             ;;
-        fedora)
+        fedora|rocky)
             bad_pkgs=("telnet" "ftp" "tftp" "tftp-server" "vsftpd")
             ;;
         arch)

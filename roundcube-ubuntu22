@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+# Escenario CCDC de correo para Ubuntu Server 22.04.
+mail_domain="correo.test"
+mail_hostname=""
+assume_yes=0
+secure_mode=0
+mail_users=(usuario1 usuario2 usuario3)
+credentials_file="/root/roundcube-usuarios.tsv"
+scenario_file="/root/roundcube-escenario-ccdc.txt"
+certificate="/etc/ssl/certs/roundcube-local.crt"
+private_key="/etc/ssl/private/roundcube-local.key"
+backup_dir=""
+
+usage() {
+    cat <<'EOF'
+Uso: sudo bash roundcube-ubuntu22 [opciones]
+
+Instala Roundcube, Apache/PHP, Postfix y Dovecot en Ubuntu Server 22.04.
+
+  --domain DOMINIO    Dominio (predeterminado: correo.test).
+  --hostname NOMBRE   Nombre del servidor (predeterminado: mail.DOMINIO).
+  --secure            No agrega las fallas deliberadas del escenario CCDC.
+  -y, --yes           Instala sin confirmación interactiva.
+  -h, --help          Muestra esta ayuda.
+
+Por defecto crea una VM deliberadamente vulnerable para práctica CCDC:
+  1. Los tres usuarios comparten una contraseña débil.
+  2. Otros usuarios locales pueden leer archivos de los Maildir.
+  3. ~/Adjuntos pertenece a root y el usuario no puede escribir allí.
+
+Usa únicamente una VM aislada. La guía de corrección queda en
+/root/roundcube-escenario-ccdc.txt y las credenciales en
+/root/roundcube-usuarios.tsv, ambos con modo 0600.
+
+Web: https://IP_DEL_SERVIDOR/roundcube/
+Puertos: SMTP 25, IMAP/STARTTLS 143, HTTPS 443 e IMAPS 993.
+EOF
+}
+
+log() { printf '[INFO] %s\n' "$*"; }
+die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+on_error() {
+    local status=$1 line=$2
+    trap - ERR
+    printf '[ERROR] Instalación detenida en línea %s (código %s).\n' "$line" "$status" >&2
+    printf '[AYUDA] Respaldos: %s\n' "${backup_dir:-todavía no creados}" >&2
+    exit "$status"
+}
+trap 'on_error "$?" "$LINENO"' ERR
+
+parse_args() {
+    while (($#)); do
+        case "$1" in
+            --domain|--hostname)
+                (($# >= 2)) || die "Falta el valor de $1."
+                if [[ $1 == --domain ]]; then mail_domain=$2; else mail_hostname=$2; fi
+                shift 2 ;;
+            --secure) secure_mode=1; shift ;;
+            -y|--yes) assume_yes=1; shift ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "Opción desconocida: $1. Consulta --help." ;;
+        esac
+    done
+    mail_hostname="${mail_hostname:-mail.$mail_domain}"
+    local label='[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?'
+    local fqdn="^${label}(\.${label})+$"
+    [[ ${#mail_domain} -le 253 && $mail_domain =~ $fqdn ]] || die "Dominio inválido: $mail_domain."
+    [[ ${#mail_hostname} -le 253 && $mail_hostname =~ $fqdn ]] || die "Hostname inválido: $mail_hostname."
+}
+
+preflight() {
+    [[ $EUID -eq 0 ]] || die "Ejecuta como root: sudo bash $0"
+    [[ -r /etc/os-release ]] || die "No se encontró /etc/os-release."
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    [[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 22.04 ]] || die "Solo admite Ubuntu 22.04. Detectado: ${PRETTY_NAME:-desconocido}."
+    [[ -d /run/systemd/system ]] || die "Se necesita systemd y una VM Ubuntu Server completa."
+    command -v apt-get >/dev/null || die "No se encontró apt-get."
+    local username entry uid home
+    for username in "${mail_users[@]}"; do
+        if entry="$(getent passwd "$username")"; then
+            IFS=: read -r _ _ uid _ _ home _ <<< "$entry"
+            [[ $uid -ge 1000 && $home == "/home/$username" ]] || die "Cuenta incompatible: $username."
+        fi
+        [[ ! -L /home/$username ]] || die "No se admite un home simbólico: /home/$username."
+    done
+    if (( ! assume_yes )); then
+        [[ -t 0 ]] || die "Usa --yes si no hay terminal interactiva."
+        (( secure_mode )) && printf 'Se instalará en modo seguro.\n' || printf 'ATENCIÓN: se instalarán fallas deliberadas CCDC.\n'
+        read -r -p 'Escribe INSTALAR para continuar: ' confirmation
+        [[ $confirmation == INSTALAR ]] || die "Instalación cancelada."
+    fi
+}
+
+backup_config() {
+    local file=$1
+    [[ -f $file ]] && install -D -m 0600 "$file" "$backup_dir$file"
+    return 0
+}
+
+install_packages() {
+    log "Instalando paquetes de Ubuntu 22.04..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y roundcube roundcube-sqlite3 apache2 libapache2-mod-php php \
+        php-cli php-curl php-gd php-intl php-mbstring php-sqlite3 php-xml php-zip \
+        postfix dovecot-imapd openssl curl iproute2 sqlite3 ufw
+    [[ -r /usr/share/roundcube/index.php ]] || die "No se encontró /usr/share/roundcube/index.php."
+    backup_dir="$(mktemp -d /var/backups/roundcube-ubuntu22.XXXXXXXX)"
+    local file
+    for file in /etc/postfix/main.cf /etc/dovecot/conf.d/99-roundcube-local.conf \
+        /etc/roundcube/config.inc.php /etc/apache2/conf-available/roundcube.conf \
+        /etc/php/8.1/apache2/conf.d/99-roundcube-local.ini "$certificate" "$private_key"; do
+        backup_config "$file"
+    done
+}
+
+create_users() {
+    local username password group
+    install -m 0600 /dev/null "$credentials_file"
+    printf 'usuario\tcorreo\tcontrasena_inicial\n' > "$credentials_file"
+    for username in "${mail_users[@]}"; do
+        id "$username" >/dev/null 2>&1 || useradd --create-home --home-dir "/home/$username" --shell /bin/bash "$username"
+        if (( secure_mode )); then password="$(openssl rand -hex 12)"; else password='Correo123!'; fi
+        printf '%s:%s\n' "$username" "$password" | chpasswd
+        printf '%s\t%s@%s\t%s\n' "$username" "$username" "$mail_domain" "$password" >> "$credentials_file"
+        group="$(id -gn "$username")"
+        install -d -m 0700 -o "$username" -g "$group" "/home/$username/Maildir/cur" \
+            "/home/$username/Maildir/new" "/home/$username/Maildir/tmp" "/home/$username/Adjuntos"
+        chown -R "$username:$group" "/home/$username"
+        chmod 0700 "/home/$username" "/home/$username/Maildir" "/home/$username/Adjuntos"
+    done
+}
+
+configure_tls() {
+    log "Creando certificado TLS local..."
+    local sans="DNS:$mail_hostname,IP:127.0.0.1" ip_address
+    for ip_address in $(hostname -I 2>/dev/null); do
+        [[ $ip_address =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && sans+=",IP:$ip_address"
+    done
+    openssl req -x509 -nodes -newkey rsa:3072 -days 365 -keyout "$private_key" \
+        -out "$certificate" -subj "/CN=$mail_hostname" -addext "subjectAltName=$sans"
+    chmod 0600 "$private_key"
+    chmod 0644 "$certificate"
+}
+
+configure_mail() {
+    log "Configurando Postfix y Dovecot..."
+    postconf -e "myhostname = $mail_hostname"
+    postconf -e "mydomain = $mail_domain"
+    postconf -e 'myorigin = $mydomain'
+    postconf -e 'mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain'
+    postconf -e 'inet_interfaces = all'
+    postconf -e 'inet_protocols = ipv4'
+    postconf -e 'mynetworks = 127.0.0.0/8'
+    postconf -e 'smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination'
+    postconf -e 'home_mailbox = Maildir/'
+    postconf -e 'mailbox_command ='
+    postconf -e 'message_size_limit = 41943040'
+    postconf -e 'mailbox_size_limit = 0'
+    postconf -e 'smtpd_tls_security_level = may'
+    postconf -e "smtpd_tls_cert_file = $certificate"
+    postconf -e "smtpd_tls_key_file = $private_key"
+    postconf -e 'default_transport = error:Este servidor solo entrega correo local'
+    newaliases
+    cat > /etc/dovecot/conf.d/99-roundcube-local.conf <<EOF
+# Administrado por roundcube-ubuntu22.
+protocols = imap
+listen = *
+mail_location = maildir:~/Maildir
+first_valid_uid = 1000
+auth_mechanisms = plain login
+auth_username_format = %Ln
+disable_plaintext_auth = yes
+ssl = required
+ssl_cert = <$certificate
+ssl_key = <$private_key
+service imap-login {
+    inet_listener imap {
+        address = *
+        port = 143
+    }
+    inet_listener imaps {
+        address = *
+        port = 993
+        ssl = yes
+    }
+}
+EOF
+    chmod 0644 /etc/dovecot/conf.d/99-roundcube-local.conf
+}
+
+configure_roundcube() {
+    log "Configurando Roundcube y Apache..."
+    local des_key database schema
+    des_key="$(openssl rand -hex 12)"
+    database="/var/lib/roundcube/roundcube.sqlite"
+    schema="/usr/share/roundcube/SQL/sqlite.initial.sql"
+    [[ -r $schema ]] || die "No se encontró el esquema SQLite de Roundcube: $schema"
+    install -d -m 0750 -o www-data -g www-data /var/lib/roundcube
+    if [[ ! -s $database ]]; then
+        sqlite3 "$database" < "$schema"
+    fi
+    chown www-data:www-data "$database"
+    chmod 0600 "$database"
+    cat > /etc/roundcube/config.inc.php <<EOF
+<?php
+\$config['db_dsnw'] = 'sqlite:////var/lib/roundcube/roundcube.sqlite?mode=0600';
+\$config['des_key'] = '$des_key';
+\$config['imap_host'] = 'ssl://127.0.0.1:993';
+\$config['default_host'] = 'ssl://127.0.0.1';
+\$config['default_port'] = 993;
+\$config['imap_conn_options'] = ['ssl' => ['verify_peer' => true, 'verify_peer_name' => false, 'cafile' => '$certificate']];
+\$config['smtp_host'] = '127.0.0.1:25';
+\$config['smtp_server'] = '127.0.0.1';
+\$config['smtp_port'] = 25;
+\$config['smtp_user'] = '';
+\$config['smtp_pass'] = '';
+\$config['mail_domain'] = '$mail_domain';
+\$config['product_name'] = 'Ubuntu Email - $mail_domain';
+\$config['language'] = 'es_ES';
+\$config['skin'] = 'elastic';
+\$config['plugins'] = [];
+\$config['enable_installer'] = false;
+\$config['force_https'] = true;
+\$config['max_message_size'] = '30M';
+EOF
+    chown root:www-data /etc/roundcube/config.inc.php
+    chmod 0640 /etc/roundcube/config.inc.php
+    cat > /etc/apache2/conf-available/roundcube.conf <<EOF
+Alias /roundcube /usr/share/roundcube
+<Directory /usr/share/roundcube>
+    Options -Indexes +FollowSymLinks
+    DirectoryIndex index.php
+    Require all granted
+</Directory>
+<DirectoryMatch "^/usr/share/roundcube/(bin|SQL|config|installer|logs|temp|vendor|tests)(/|$)">
+    Require all denied
+</DirectoryMatch>
+<VirtualHost *:443>
+    ServerName $mail_hostname
+    SSLEngine on
+    SSLCertificateFile $certificate
+    SSLCertificateKeyFile $private_key
+</VirtualHost>
+EOF
+    cat > /etc/php/8.1/apache2/conf.d/99-roundcube-local.ini <<'EOF'
+upload_max_filesize = 20M
+post_max_size = 28M
+memory_limit = 256M
+session.cookie_httponly = On
+session.cookie_secure = On
+EOF
+    a2enmod ssl
+    a2enconf roundcube
+    php -l /etc/roundcube/config.inc.php
+    apache2ctl configtest
+}
+
+start_services() {
+    systemctl enable --now postfix dovecot apache2
+    systemctl restart postfix dovecot apache2
+    local unit
+    for unit in postfix dovecot apache2; do
+        systemctl is-active --quiet "$unit" || die "No arrancó $unit. Revisa journalctl -u $unit -n 50."
+    done
+    if ufw status | grep -q '^Status: active'; then
+        ufw allow 25/tcp
+        ufw allow 143/tcp
+        ufw allow 443/tcp
+        ufw allow 993/tcp
+    fi
+}
+
+send_welcome() {
+    local username
+    for username in "${mail_users[@]}"; do
+        /usr/sbin/sendmail -i -- "$username@$mail_domain" <<EOF
+From: postmaster@$mail_domain
+To: $username@$mail_domain
+Subject: Escenario Ubuntu Email
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="ccdc"
+
+--ccdc
+Content-Type: text/plain; charset=UTF-8
+
+Tu buzón local está listo. Este servidor contiene fallas de práctica CCDC.
+--ccdc
+Content-Type: text/plain; name="evidencia.txt"
+Content-Disposition: attachment; filename="evidencia.txt"
+
+Adjunto de prueba para el escenario CCDC.
+--ccdc--
+EOF
+    done
+    sleep 2
+}
+
+apply_ccdc_misconfigurations() {
+    local username group
+    (( secure_mode )) && return 0
+    log "Aplicando fallas deliberadas del escenario CCDC..."
+    for username in "${mail_users[@]}"; do
+        group="$(id -gn "$username")"
+        chmod 0755 "/home/$username" "/home/$username/Maildir"
+        find "/home/$username/Maildir" -type d -exec chmod 0755 {} +
+        find "/home/$username/Maildir" -type f -exec chmod 0644 {} +
+        chown root:root "/home/$username/Adjuntos"
+        chmod 0555 "/home/$username/Adjuntos"
+        chown -R "$username:$group" "/home/$username/Maildir"
+    done
+}
+
+write_scenario_guide() {
+    if (( secure_mode )); then
+        printf 'Instalado en modo seguro; no se aplicaron fallas CCDC.\n' > "$scenario_file"
+    else
+        cat > "$scenario_file" <<'EOF'
+ESCENARIO CCDC - Ubuntu Email 22.04
+
+Fallas deliberadas:
+1. usuario1, usuario2 y usuario3 usan la contraseña Correo123!
+2. Los homes/Maildir tienen 0755 y los mensajes existentes 0644.
+3. ~/Adjuntos es root:root 0555 y el propietario no puede escribir.
+
+Comprobaciones:
+  sudo -u usuario1 test -w /home/usuario1/Adjuntos; echo $?
+  sudo -u usuario2 find /home/usuario1/Maildir -type f -readable
+  sudo ss -lntp | grep -E ':(25|143|443|993) '
+
+Correcciones (repetir para cada usuario):
+  chown usuario1:usuario1 /home/usuario1/Adjuntos
+  chmod 700 /home/usuario1 /home/usuario1/Maildir /home/usuario1/Adjuntos
+  find /home/usuario1/Maildir -type d -exec chmod 700 {} +
+  find /home/usuario1/Maildir -type f -exec chmod 600 {} +
+  passwd usuario1
+
+No expongas esta VM a Internet.
+EOF
+    fi
+    chown root:root "$scenario_file"
+    chmod 0600 "$scenario_file"
+}
+
+verify() {
+    doveconf -n >/dev/null
+    postfix check
+    apache2ctl configtest
+    local port
+    for port in 25 143 443 993; do
+        ss -lntH | awk -v suffix=":$port" '
+            substr($4, length($4) - length(suffix) + 1) == suffix { found = 1 }
+            END { exit !found }
+        ' || die "El puerto $port no está escuchando."
+    done
+    curl --insecure --fail --silent --max-time 20 https://127.0.0.1/roundcube/ \
+        | grep 'name="_user"' >/dev/null || die "Roundcube no mostró el formulario."
+}
+
+main() {
+    parse_args "$@"
+    preflight
+    install_packages
+    create_users
+    configure_tls
+    configure_mail
+    configure_roundcube
+    start_services
+    send_welcome
+    apply_ccdc_misconfigurations
+    write_scenario_guide
+    verify
+    printf '\nInstalación terminada: https://IP_DEL_SERVIDOR/roundcube/\n'
+    printf 'Credenciales: sudo cat %s\n' "$credentials_file"
+    printf 'Guía CCDC: sudo cat %s\n' "$scenario_file"
+    printf 'Respaldos: %s\n' "$backup_dir"
+    (( secure_mode )) && printf 'Modo: SEGURO.\n' || printf 'Modo: CCDC VULNERABLE (VM aislada).\n'
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

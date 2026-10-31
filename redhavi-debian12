@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Debian 12 profile for the Debian Splunk CCDC host.
+# Keep this file beside redhavi; the shared implementation is sourced below.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+IMPLEMENTATION="${SCRIPT_DIR}/redhavi"
+
+if [ ! -r "$IMPLEMENTATION" ]; then
+    printf '[redhavi-debian12][ERROR] Shared installer not found: %s\n' "$IMPLEMENTATION" >&2
+    printf '[redhavi-debian12][HELP] Keep redhavi-debian12 and redhavi in the same directory.\n' >&2
+    exit 1
+fi
+
+export REDHAVI_PROGRAM_NAME="redhavi-debian12"
+export REDHAVI_SCENARIO_NAME="redhavi-debian12"
+export REDHAVI_SCENARIO_VERSION="1"
+export REDHAVI_EXPECTED_CHECKS="9"
+export REDHAVI_REQUIRED_OS_ID="debian"
+export REDHAVI_OS_LABEL="Debian"
+export REDHAVI_REQUIRED_VERSION_ID="12"
+export REDHAVI_REQUIRED_VERSION_IDS="12"
+export REDHAVI_ENABLE_CANARY="0"
+export REDHAVI_INSTALL_TFTP="1"
+
+# shellcheck source=redhavi
+. "$IMPLEMENTATION"
+
+printf '[redhavi-debian12][WARN] This lab intentionally makes the existing splunk account interactive, adds it to sudo, and sets a practice password.\n' >&2
+printf '[redhavi-debian12][WARN] Use only on the authorized disposable Debian Splunk training VM.\n' >&2
+main "$@"

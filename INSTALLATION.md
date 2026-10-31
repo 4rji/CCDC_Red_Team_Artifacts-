@@ -75,10 +75,11 @@ If packaging is unnecessary, install the readable script instead. This replaces 
 sudo install -m 0755 redhavi-check /usr/local/bin/redhavi-check
 ```
 
-### Ubuntu 24.04 scenario with monitor check-ins
+### Ubuntu 22.04/24.04 scenario with monitor check-ins
 
-The Ubuntu 24.04 profile adds a systemd oneshot service and timer that call the
-monitor every three minutes. It requires exactly Ubuntu `24.04`. Install the
+The Ubuntu LTS profile adds a systemd oneshot service and timer that call the
+monitor every three minutes. It accepts Ubuntu `22.04` and `24.04`; the
+historical `ubuntu24` filenames are retained for compatibility. Install the
 profile and its shared implementation together:
 
 ```bash
@@ -88,7 +89,7 @@ sudo install -m 0755 redhavi redhavi-ubuntu24 \
 ```
 
 Start `ccdc-canary-monitor` on the isolated instructor network first, then seed a
-disposable Ubuntu 24.04 VM using the monitor address reachable from that VM:
+disposable Ubuntu 22.04 or 24.04 VM using the monitor address reachable from that VM:
 
 ```bash
 sudo CANARY_URL=http://MONITOR_IP:8081/checkin \
@@ -124,13 +125,32 @@ result=$?
 printf 'Checker exit code: %s\n' "$result"
 ```
 
-This checker expects Fedora and runs `16` scored checks. Its service checks are informational and do not contribute to the score. It does not enforce the same scenario-state marker as the Ubuntu checker, so confirm the VM's exercise baseline separately.
+This checker expects Fedora and runs `17` scored checks. Its service checks are informational and do not contribute to the score. It does not enforce the same scenario-state marker as the Ubuntu checker, so confirm the VM's exercise baseline separately.
 
 To install the readable script instead:
 
 ```bash
 sudo install -m 0755 redhavi-check-fedora /usr/local/bin/redhavi-check-fedora
 ```
+
+### Rocky Linux variant
+
+Rocky Linux uses the same RPM-oriented scenario through a dedicated seeder
+entry point. The checker is standalone and does not need a companion file:
+
+```bash
+sudo install -d -m 0755 /usr/local/bin
+sudo install -m 0755 redhavi-fedora redhavi-rocky /usr/local/bin/
+sudo install -m 0755 redhavi-check-rocky /usr/local/bin/
+
+/usr/local/bin/redhavi-rocky
+sudo /usr/local/bin/redhavi-check-rocky
+```
+
+The first command is a dry-run. To seed an authorized disposable Rocky VM,
+rerun it with `sudo ... --apply` (and optionally `--yes`). The Rocky seeder
+uses `dnf`; the checker expects `rpm` and runs the same `17` scored checks as
+the current readable Fedora checker.
 
 ## 5. Copy Linux binaries to another exercise VM
 
@@ -149,7 +169,7 @@ sudo install -m 0755 ./redhavi-check /usr/local/bin/redhavi-check
 sudo /usr/local/bin/redhavi-check
 ```
 
-For Fedora, transfer `build/redhavi-check-fedora` and install it as `/usr/local/bin/redhavi-check-fedora` instead.
+For Fedora, transfer `build/redhavi-check-fedora` and install it as `/usr/local/bin/redhavi-check-fedora` instead. For Rocky, transfer the standalone readable file `redhavi-check-rocky`; it does not need `redhavi-check-fedora` beside it.
 
 If a compiled file fails on the destination, rebuild on that OS and architecture, or use the readable checker. Keep `/bin/bash` and the checker's system utilities installed.
 

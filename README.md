@@ -18,11 +18,15 @@ Versión navegable por secciones: [ccdc_php.html](ccdc-php/ccdc_php.html).
 | Archivo | Plataforma | Función | Modifica el sistema |
 | --- | --- | --- | --- |
 | `redhavi` | Ubuntu | Escenario Linux base: paquetes inseguros, usuarios, cron, webshell de práctica y clave SSH. | Sí |
-| `redhavi-ubuntu24` | Ubuntu 24.04 | Perfil del escenario base que además instala el check-in periódico al monitor. | Sí |
+| `redhavi-ubuntu24` | Ubuntu 22.04/24.04 | Perfil LTS del escenario base que además instala el check-in periódico al monitor. | Sí |
+| `redhavi-debian12` | Debian 12 | Perfil para la máquina Debian Splunk; requiere el archivo compartido `redhavi` a su lado. | Sí |
 | `redhavi-fedora` | Fedora | Escenario equivalente para Fedora; por defecto solo muestra un dry-run. | Solo con `--apply` |
+| `redhavi-rocky` | Rocky Linux | Entrada para desplegar el escenario Fedora-compatible en Rocky; requiere `redhavi-fedora` a su lado. | Solo con `--apply` |
 | `redhavi-check` | Ubuntu/Linux | Evalúa la limpieza del escenario Linux base. | No |
-| `redhavi-check-ubuntu24` | Ubuntu 24.04 | Evalúa 10 controles, incluido el servicio/timer canary. | No |
+| `redhavi-check-ubuntu24` | Ubuntu 22.04/24.04 | Evalúa 10 controles, incluido el servicio/timer canary. | No |
+| `redhavi-check-debian12` | Debian 12 | Evalúa 9 controles del escenario Debian Splunk; requiere `redhavi-check` a su lado. | No |
 | `redhavi-check-fedora` | Fedora | Evalúa la limpieza del escenario Fedora. | No |
+| `redhavi-check-rocky` | Rocky Linux | Checker autónomo que evalúa la limpieza del escenario Rocky. | No |
 | `redhavi-check-shc` | Linux | Fuente adaptada para compilar el checker Linux con SHC. | No |
 | `redhavi-check-federo-shc` | Fedora | Fuente SHC del checker Fedora; el nombre `federo` es histórico. | No |
 | `windows-dos-combined/redhaviwin.ps1` | Windows | Prepara el escenario Windows con cuentas, persistencia, web y check-ins. | Sí |
@@ -35,6 +39,7 @@ Versión navegable por secciones: [ccdc_php.html](ccdc-php/ccdc_php.html).
 | `ecomredhavi` | Ubuntu/Debian | Laboratorio Apache, PHP y MySQL con configuraciones débiles e indicadores inertes. | Sí |
 | `ecomredhavimysql` | Ubuntu/Debian | Variante explícita del laboratorio web/MySQL con headers débiles y contraseñas conocidas. | Sí |
 | `instservices` | Ubuntu Server 24.04 | Instala Postfix, Dovecot, 12 usuarios de correo, Apache y PHP con fallos intencionales. | Sí |
+| `roundcube-ubuntu22` | Ubuntu Server 22.04 | Escenario Ubuntu Email con Roundcube y tres fallas CCDC deliberadas. | Sí |
 | `redhavi-apolloWin.ps1` | Windows | Artefacto opcional de tarea programada para un payload Apollo autorizado. | Sí |
 | `redhavi-poseidon` | Linux/systemd | Artefacto opcional de servicio y timer para un payload Poseidon autorizado. | Sí |
 | `redhavi-task.md` | Todas | Hoja de investigación que se entrega al Blue Team. | No |
@@ -113,7 +118,7 @@ El checker exige el marcador preparado en `/var/lib/redhavi/state`. Ejecutarlo
 sin haber desplegado el escenario correspondiente produce un error de
 infraestructura, no una puntuación válida.
 
-## Ubuntu 24.04 con monitor
+## Ubuntu 22.04 y 24.04 con monitor
 
 Este es el perfil recomendado cuando se quiere visualizar la persistencia en
 el dashboard. `redhavi-ubuntu24` debe permanecer junto a `redhavi`, y
@@ -127,7 +132,22 @@ sudo ./redhavi-ubuntu24 --verify
 sudo ./redhavi-check-ubuntu24
 ```
 
-El perfil exige exactamente Ubuntu 24.04. Instala
+### Debian 12 Splunk profile
+
+Keep `redhavi-debian12` beside `redhavi`, and keep
+`redhavi-check-debian12` beside `redhavi-check`. This profile is intended for
+the Debian 12 Splunk practice VM. Splunk may already be installed; the script
+does not reinstall it. As an intentional CCDC finding, it changes an existing
+`splunk` account into an interactive sudo user and assigns the lab password.
+
+```bash
+sudo ./redhavi-debian12
+sudo ./redhavi-debian12 --verify
+sudo ./redhavi-check-debian12
+```
+
+El perfil admite Ubuntu 22.04 y 24.04 LTS; el nombre histórico del archivo se
+conserva para no romper despliegues existentes. Instala
 `redhavi-canary.service` y `redhavi-canary.timer`; el timer llama al monitor
 cada tres minutos. Puedes cambiar el intervalo durante el sembrado:
 
@@ -160,6 +180,78 @@ sudo CANARY_URL=http://IP_DEL_MONITOR:8081/checkin \
 
 sudo ./redhavi-check-fedora
 ```
+
+## Rocky Linux
+
+La variante para Rocky reutiliza la implementación del seeder mantenida para
+la familia Fedora/RHEL, por lo que `redhavi-rocky` debe permanecer junto a
+`redhavi-fedora`. El checker `redhavi-check-rocky` es autónomo y se puede
+copiar o renombrar sin archivos adicionales.
+
+Primero revisa el dry-run seguro:
+
+```bash
+./redhavi-rocky
+```
+
+En una VM Rocky Linux autorizada, aislada y desechable:
+
+```bash
+sudo CANARY_URL=http://IP_DEL_MONITOR:8081/checkin \
+  ./redhavi-rocky --apply
+
+sudo ./redhavi-check-rocky
+```
+
+El seeder usa `dnf` y el checker usa la base de datos RPM. La confirmación y
+la opción `--yes` funcionan igual que en Fedora.
+
+## Ubuntu Email 22.04 con Roundcube
+
+`roundcube-ubuntu22` instala el escenario en **Ubuntu Server 22.04**. Es
+autónomo e instala Roundcube, Apache/PHP, Postfix, Dovecot y SQLite desde APT.
+Requiere una VM aislada con systemd e Internet.
+
+```bash
+sudo bash ./roundcube-ubuntu22
+# Sin confirmación y con un dominio local:
+sudo bash ./roundcube-ubuntu22 --domain equipo.test --yes
+# Instalación sin las fallas deliberadas:
+sudo bash ./roundcube-ubuntu22 --secure --yes
+```
+
+Por defecto prepara tres fallas para que el Blue Team las encuentre:
+
+1. `usuario1`, `usuario2` y `usuario3` comparten `Correo123!`.
+2. Los mensajes iniciales de cada Maildir son legibles por otros usuarios
+   locales debido a permisos `0755/0644`.
+3. `/home/usuarioN/Adjuntos` es `root:root` con modo `0555`, por lo que el
+   propietario no puede guardar archivos allí.
+
+La guía privada `/root/roundcube-escenario-ccdc.txt` explica cómo comprobar y
+corregir cada falla. Las credenciales están en:
+
+```bash
+sudo cat /root/roundcube-usuarios.tsv
+```
+
+Con el dominio predeterminado, las direcciones son `usuario1@correo.test`,
+`usuario2@correo.test` y `usuario3@correo.test`. El script guarda copias de las
+configuraciones modificadas en `/var/backups/roundcube-ubuntu22.*`.
+
+Cada usuario tiene `/home/usuarioN/Maildir/` para sus mensajes y
+`/home/usuarioN/Adjuntos/` como objetivo de la falla de permisos. Roundcube no
+extrae adjuntos automáticamente allí: una descarga web va a la computadora del
+cliente. La carpeta simula el problema equivalente de una aplicación o cliente
+local que intenta guardar el adjunto en el home. Se admiten adjuntos de 20 MiB
+y cada cuenta recibe un mensaje de prueba.
+
+Solo se configura entrega para cuentas locales del servidor, no retransmisión
+pública por Internet. HTTPS/443, SMTP/25, IMAP/143 con STARTTLS e IMAPS/993
+escuchan en todas las interfaces IPv4; si UFW ya está activo, el instalador
+permite esos puertos. Para un cliente remoto usa IMAPS/993 con el usuario
+`usuarioN`. El instalador valida Dovecot, Postfix, Apache, los listeners y el
+formulario web antes de terminar. No expongas este escenario a Internet.
 
 ## Windows
 
@@ -389,10 +481,10 @@ solo que la máquina esté libre de toda actividad maliciosa.
 Desde la raíz del repositorio:
 
 ```bash
-bash -n redhavi redhavi-ubuntu24 redhavi-fedora \
-  redhavi-check redhavi-check-ubuntu24 redhavi-check-fedora \
+bash -n redhavi redhavi-ubuntu24 redhavi-fedora redhavi-rocky \
+  redhavi-check redhavi-check-ubuntu24 redhavi-check-fedora redhavi-check-rocky \
   redhavi-check-shc redhavi-check-federo-shc redhavi-poseidon \
-  ecomredhavi ecomredhavimysql instservices
+  ecomredhavi ecomredhavimysql instservices roundcube-ubuntu22
 
 python3 -m py_compile ccdc-canary-monitor
 ```

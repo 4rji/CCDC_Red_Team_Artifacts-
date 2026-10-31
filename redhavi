@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Redhavi: CCDC practice scenario for Ubuntu.
+# Redhavi: shared CCDC practice scenario for Debian-family systems.
 PROGRAM_NAME="${REDHAVI_PROGRAM_NAME:-redhavi}"
 SCENARIO_NAME="${REDHAVI_SCENARIO_NAME:-redhavi}"
 WEB_REPO_URL="${WEB_REPO_URL:-https://github.com/banago/simple-php-website.git}"
@@ -15,6 +15,9 @@ CANARY_TIMER="redhavi-canary.timer"
 REDHAVI_ENABLE_CANARY="${REDHAVI_ENABLE_CANARY:-0}"
 REDHAVI_INSTALL_TFTP="${REDHAVI_INSTALL_TFTP:-1}"
 REDHAVI_REQUIRED_VERSION_ID="${REDHAVI_REQUIRED_VERSION_ID:-}"
+REDHAVI_REQUIRED_VERSION_IDS="${REDHAVI_REQUIRED_VERSION_IDS:-$REDHAVI_REQUIRED_VERSION_ID}"
+REDHAVI_REQUIRED_OS_ID="${REDHAVI_REQUIRED_OS_ID:-ubuntu}"
+REDHAVI_OS_LABEL="${REDHAVI_OS_LABEL:-Ubuntu}"
 
 # These values pin the expected artifacts. If a URL changes, provide the
 # corresponding hash or fingerprint through the environment as well.
@@ -43,6 +46,7 @@ PACKAGES=(
     apache2
     cron
     e2fsprogs
+    passwd
     openssh-client
     telnet
     ftp
@@ -115,7 +119,7 @@ usage() {
     cat <<EOF
 Usage: ${PROGRAM_NAME} [--verify]
 
-With no options, seeds the CCDC scenario on an authorized Ubuntu machine.
+With no options, seeds the CCDC scenario on an authorized ${REDHAVI_OS_LABEL} machine.
 
   --verify   Verify the existing deployment without changing it.
   -h, --help Show this help message.
@@ -133,7 +137,18 @@ require_root() {
     fi
 }
 
-require_ubuntu() {
+os_version_is_allowed() {
+    local detected_version=$1
+    local allowed_version
+
+    [ -z "$REDHAVI_REQUIRED_VERSION_IDS" ] && return 0
+    for allowed_version in $REDHAVI_REQUIRED_VERSION_IDS; do
+        [ "$detected_version" = "$allowed_version" ] && return 0
+    done
+    return 1
+}
+
+require_supported_os() {
     local os_release="${REDHAVI_ROOT}/etc/os-release"
 
     if [ ! -r "$os_release" ]; then
@@ -142,12 +157,11 @@ require_ubuntu() {
 
     # shellcheck disable=SC1090
     . "$os_release"
-    if [ "${ID:-}" != "ubuntu" ]; then
-        die "This script is designed for Ubuntu. Detected: ${PRETTY_NAME:-unknown}"
+    if [ "${ID:-}" != "$REDHAVI_REQUIRED_OS_ID" ]; then
+        die "This script is designed for ${REDHAVI_OS_LABEL}. Detected: ${PRETTY_NAME:-unknown}"
     fi
-    if [ -n "$REDHAVI_REQUIRED_VERSION_ID" ] \
-        && [ "${VERSION_ID:-}" != "$REDHAVI_REQUIRED_VERSION_ID" ]; then
-        die "This script requires Ubuntu ${REDHAVI_REQUIRED_VERSION_ID}. Detected: ${PRETTY_NAME:-unknown}"
+    if ! os_version_is_allowed "${VERSION_ID:-}"; then
+        die "This script requires ${REDHAVI_OS_LABEL} ${REDHAVI_REQUIRED_VERSION_IDS// / or }. Detected: ${PRETTY_NAME:-unknown}"
     fi
 }
 
@@ -166,16 +180,16 @@ validate_canary_settings() {
 require_commands() {
     local command_name
 
-    for command_name in apt-get awk chattr chown crontab curl dpkg-query getent \
-        git grep id install lsattr mktemp passwd sha256sum ssh-keygen systemctl \
-        useradd usermod; do
+    for command_name in apt-get awk chattr chown chpasswd crontab curl \
+        dpkg-query getent git grep groupadd id install lsattr mktemp passwd \
+        sha256sum ssh-keygen systemctl useradd usermod; do
         command -v "$command_name" >/dev/null 2>&1 \
             || die "Required command is unavailable: $command_name"
     done
 }
 
 install_packages() {
-    log "Installing scenario packages for Ubuntu..."
+    log "Installing scenario packages for ${REDHAVI_OS_LABEL}..."
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y "${PACKAGES[@]}"
 }
@@ -590,7 +604,7 @@ main() {
     done
 
     require_root
-    require_ubuntu
+    require_supported_os
     validate_canary_settings
 
     if [ "$verify_only" -eq 1 ]; then

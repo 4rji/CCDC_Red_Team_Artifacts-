@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Ubuntu 24.04 profile for the shared, hardened Ubuntu scenario implementation.
+# Ubuntu 22.04/24.04 LTS profile. The historical filename is kept for compatibility.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 export REDHAVI_PROGRAM_NAME="redhavi-ubuntu24"
 export REDHAVI_SCENARIO_NAME="redhavi-ubuntu24"
 export REDHAVI_SCENARIO_VERSION="1"
 export REDHAVI_EXPECTED_CHECKS="10"
-export REDHAVI_REQUIRED_VERSION_ID="24.04"
+export REDHAVI_REQUIRED_VERSION_ID=""
+export REDHAVI_REQUIRED_VERSION_IDS="22.04 24.04"
 export REDHAVI_ENABLE_CANARY="1"
 export REDHAVI_INSTALL_TFTP="0"
 

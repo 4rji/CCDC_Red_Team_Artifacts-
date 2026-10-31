@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# Debian 12 cleanup checker profile. Keep it beside redhavi-check.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+IMPLEMENTATION="${SCRIPT_DIR}/redhavi-check"
+
+if [ ! -r "$IMPLEMENTATION" ]; then
+    printf '[ERROR] Shared checker not found: %s\n' "$IMPLEMENTATION" >&2
+    printf '[HELP] Keep redhavi-check-debian12 and redhavi-check in the same directory.\n' >&2
+    exit 2
+fi
+
+export REDHAVI_SCENARIO_NAME="redhavi-debian12"
+export REDHAVI_SCENARIO_VERSION="1"
+export REDHAVI_EXPECTED_CHECKS="9"
+export REDHAVI_REQUIRED_OS_ID="debian"
+export REDHAVI_OS_LABEL="Debian"
+export REDHAVI_REQUIRED_VERSION_ID="12"
+export REDHAVI_REQUIRED_VERSION_IDS="12"
+export REDHAVI_REQUIRE_STATE="1"
+export REDHAVI_CHECK_CANARY="0"
+
+# shellcheck source=redhavi-check
+. "$IMPLEMENTATION"
+main "$@"

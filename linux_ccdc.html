@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CCDC preparation guide for Rocky Linux e-commerce and Ubuntu email services.">
+  <title>Linux CCDC Lab Guide</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #081018;
+      --panel: #111c27;
+      --panel-soft: #172431;
+      --text: #edf4f8;
+      --muted: #a9b8c5;
+      --line: #2a3a47;
+      --rocky: #64d98b;
+      --ubuntu: #ff8d62;
+      --warning: #ffd166;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 10% 0%, rgba(100, 217, 139, .12), transparent 30rem),
+        radial-gradient(circle at 90% 15%, rgba(255, 141, 98, .12), transparent 32rem),
+        var(--bg);
+      color: var(--text);
+      font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    a { color: inherit; }
+    code { font-family: "SFMono-Regular", Consolas, monospace; }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header { padding: 72px 0 42px; }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--warning);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 780px;
+      margin: 0;
+      font-size: clamp(2.5rem, 7vw, 5rem);
+      line-height: .98;
+      letter-spacing: -.055em;
+    }
+
+    .intro {
+      max-width: 720px;
+      margin: 24px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    nav a {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 9px 14px;
+      background: rgba(17, 28, 39, .75);
+      text-decoration: none;
+    }
+
+    nav a:hover, nav a:focus-visible { border-color: var(--text); }
+
+    .lab {
+      margin-bottom: 34px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(17, 28, 39, .93);
+      box-shadow: 0 18px 55px rgba(0, 0, 0, .24);
+    }
+
+    .lab-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: start;
+      padding: 30px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .lab h2 {
+      margin: 0 0 8px;
+      font-size: clamp(1.7rem, 4vw, 2.5rem);
+      line-height: 1.1;
+    }
+
+    .lab-head p { max-width: 660px; margin: 0; color: var(--muted); }
+
+    .distro {
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-size: .78rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .rocky .distro, .rocky h3 { color: var(--rocky); }
+    .ubuntu .distro, .ubuntu h3 { color: var(--ubuntu); }
+
+    .lab-body {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
+    }
+
+    .block { padding: 28px; background: var(--panel); }
+    .wide { grid-column: 1 / -1; }
+
+    h3 {
+      margin: 0 0 14px;
+      font-size: .82rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    ul, ol { margin: 0; padding-left: 1.2rem; }
+    li + li { margin-top: 7px; }
+    li::marker { color: var(--muted); }
+
+    .files {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .files code {
+      display: block;
+      overflow-wrap: anywhere;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 7px 10px;
+      background: #0a131c;
+      color: #d9e7ef;
+      font-size: .88rem;
+    }
+
+    .tips {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .tip {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      background: var(--panel-soft);
+    }
+
+    .tip strong { display: block; margin-bottom: 5px; }
+    .tip p { margin: 0; color: var(--muted); }
+
+    .objective {
+      border-left: 3px solid var(--warning);
+      padding-left: 16px;
+      color: #f7e9b7;
+    }
+
+    .objective p { margin: 0; }
+
+    .commands {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .commands code {
+      border-radius: 7px;
+      padding: 6px 9px;
+      background: #071018;
+      color: #cce3ef;
+    }
+
+    footer {
+      padding: 14px 0 50px;
+      color: var(--muted);
+      text-align: center;
+      font-size: .9rem;
+    }
+
+    @media (max-width: 760px) {
+      header { padding-top: 48px; }
+      .lab-head, .lab-body { grid-template-columns: 1fr; }
+      .wide { grid-column: auto; }
+      .distro { justify-self: start; }
+      .tips { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <p class="eyebrow">Tomorrow's Labs</p>
+    <h1>Linux CCDC Field Guide</h1>
+    <p class="intro">Two service-focused exercises. Learn how each stack works, secure it without destroying availability, and be ready to explain every change.</p>
+    <nav aria-label="Lab navigation">
+      <a href="#ecommerce">Rocky Linux 9 · E-Commerce</a>
+      <a href="#email">Ubuntu 22.04 · Email</a>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section class="lab rocky" id="ecommerce">
+      <div class="lab-head">
+        <div>
+          <h2>E-Commerce Storefront</h2>
+          <p>Secure a small Apache and PHP storefront while preserving remote access, the product catalog, and the shopping cart.</p>
+        </div>
+        <span class="distro">Rocky Linux 9</span>
+      </div>
+
+      <div class="lab-body">
+        <article class="block">
+          <h3>Know the stack</h3>
+          <ul>
+            <li><strong>Apache:</strong> serves the storefront over HTTP.</li>
+            <li><strong>PHP:</strong> runs the application logic.</li>
+            <li><strong>PHP sessions:</strong> preserve the shopping cart.</li>
+            <li><strong>firewalld:</strong> controls network exposure.</li>
+            <li><strong>SELinux:</strong> limits web-service access.</li>
+          </ul>
+        </article>
+
+        <article class="block">
+          <h3>Review these paths</h3>
+          <ul class="files">
+            <li><code>/etc/httpd/conf/httpd.conf</code></li>
+            <li><code>/etc/httpd/conf.d/</code></li>
+            <li><code>/etc/php.ini</code></li>
+            <li><code>/etc/php.d/99-ecom-ccdc.ini</code></li>
+            <li><code>/var/www/html/store/</code></li>
+            <li><code>/var/log/httpd/</code></li>
+          </ul>
+        </article>
+
+        <article class="block wide">
+          <h3>Two priority tips</h3>
+          <div class="tips">
+            <div class="tip">
+              <strong>1. Secure without breaking availability</strong>
+              <p>Enable <code>firewalld</code>, permit only the storefront traffic, then test the site from another machine after each change.</p>
+            </div>
+            <div class="tip">
+              <strong>2. Treat users and PHP as attack surfaces</strong>
+              <p>Audit accounts, sudo access and SSH keys; then disable exposed errors, version disclosure, and insecure session-cookie settings.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="block">
+          <h3>CCDC checks</h3>
+          <ul>
+            <li>Unauthorized users or additional UID 0 accounts.</li>
+            <li>Weak ownership and permissions under the web root.</li>
+            <li>Disabled or modified firewall rules.</li>
+            <li>Unnecessary ports, services, cron jobs, or timers.</li>
+            <li>Insecure PHP settings and exposed error details.</li>
+            <li>RedHavi files, accounts, keys, and persistence.</li>
+          </ul>
+        </article>
+
+        <article class="block">
+          <h3>Useful commands</h3>
+          <div class="commands">
+            <code>ss -lntp</code>
+            <code>firewall-cmd --list-all</code>
+            <code>systemctl status httpd</code>
+            <code>getenforce</code>
+            <code>restorecon -RF /var/www/html/store</code>
+            <code>journalctl -u httpd</code>
+          </div>
+        </article>
+
+        <article class="block wide objective">
+          <h3>Practical objective</h3>
+          <p>Open the storefront from another machine, add products to the cart, secure the host, remove RedHavi artifacts, and prove the application still works.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="lab ubuntu" id="email">
+      <div class="lab-head">
+        <div>
+          <h2>Email with Roundcube</h2>
+          <p>Understand the complete mail path—from SMTP delivery to Maildir storage and remote access through webmail or IMAP.</p>
+        </div>
+        <span class="distro">Ubuntu 22.04</span>
+      </div>
+
+      <div class="lab-body">
+        <article class="block">
+          <h3>Know the stack</h3>
+          <ul>
+            <li><strong>Roundcube:</strong> provides the webmail interface.</li>
+            <li><strong>Postfix:</strong> sends and receives SMTP mail.</li>
+            <li><strong>Dovecot:</strong> provides IMAP access.</li>
+            <li><strong>Apache/PHP:</strong> hosts Roundcube.</li>
+            <li><strong>Maildir:</strong> stores each user's messages.</li>
+          </ul>
+        </article>
+
+        <article class="block">
+          <h3>Review these paths</h3>
+          <ul class="files">
+            <li><code>/etc/postfix/main.cf</code></li>
+            <li><code>/etc/dovecot/dovecot.conf</code></li>
+            <li><code>/etc/dovecot/conf.d/</code></li>
+            <li><code>/etc/roundcube/config.inc.php</code></li>
+            <li><code>/etc/apache2/conf-enabled/roundcube.conf</code></li>
+            <li><code>/home/username/Maildir/</code></li>
+          </ul>
+        </article>
+
+        <article class="block wide">
+          <h3>Two priority tips</h3>
+          <div class="tips">
+            <div class="tip">
+              <strong>1. Do not confuse listening with relaying</strong>
+              <p><code>inet_interfaces = all</code> accepts remote connections. Never use <code>mynetworks = 0.0.0.0/0</code>; that can create an open relay.</p>
+            </div>
+            <div class="tip">
+              <strong>2. Follow the message to disk</strong>
+              <p>Send a test attachment, locate it under the recipient's <code>Maildir</code>, and verify ownership and permissions without making mail readable by other users.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="block">
+          <h3>CCDC checks</h3>
+          <ul>
+            <li>Ports 25, 143, 443, and 993.</li>
+            <li>Unauthorized users, sudo access, or SSH keys.</li>
+            <li>Incorrect home, Maildir, and attachment permissions.</li>
+            <li>Stopped Postfix, Dovecot, or Apache services.</li>
+            <li>Modified firewall rules and unnecessary exposure.</li>
+            <li>Unauthorized SMTP relaying and RedHavi persistence.</li>
+          </ul>
+        </article>
+
+        <article class="block">
+          <h3>Useful commands</h3>
+          <div class="commands">
+            <code>ss -lntp</code>
+            <code>ufw status verbose</code>
+            <code>postconf -n</code>
+            <code>doveconf -n</code>
+            <code>systemctl --failed</code>
+            <code>journalctl -u postfix -u dovecot</code>
+          </div>
+        </article>
+
+        <article class="block wide objective">
+          <h3>Practical objective</h3>
+          <p>Send an email with an attachment from one user to another, access it from a different machine, and demonstrate where it is stored under the recipient's <code>Maildir</code>.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    Keep services available. Document every finding, change, test, and recovery step.
+  </footer>
+</body>
+</html>

@@ -27,6 +27,9 @@ SCENARIO_VERSION="${REDHAVI_SCENARIO_VERSION:-2}"
 UBUNTU_EXPECTED_CHECKS="${REDHAVI_EXPECTED_CHECKS:-9}"
 REDHAVI_CHECK_CANARY="${REDHAVI_CHECK_CANARY:-0}"
 REDHAVI_REQUIRED_VERSION_ID="${REDHAVI_REQUIRED_VERSION_ID:-}"
+REDHAVI_REQUIRED_VERSION_IDS="${REDHAVI_REQUIRED_VERSION_IDS:-$REDHAVI_REQUIRED_VERSION_ID}"
+REDHAVI_REQUIRED_OS_ID="${REDHAVI_REQUIRED_OS_ID:-}"
+REDHAVI_OS_LABEL="${REDHAVI_OS_LABEL:-Ubuntu}"
 CANARY_SERVICE="redhavi-canary.service"
 CANARY_TIMER="redhavi-canary.timer"
 ROOT_KEY_BLOB="${ROOT_KEY_BLOB:-AAAAC3NzaC1lZDI1NTE5AAAAILvd2Ok5Jk5HN1XFacHqgh+c2PhAr26Z8FZ130iaVDUB}"
@@ -75,6 +78,17 @@ require_root() {
     [ "$uid" -eq 0 ] || fatal "Run the checker as root: sudo $0"
 }
 
+os_version_is_allowed() {
+    local detected_version=$1
+    local allowed_version
+
+    [ -z "$REDHAVI_REQUIRED_VERSION_IDS" ] && return 0
+    for allowed_version in $REDHAVI_REQUIRED_VERSION_IDS; do
+        [ "$detected_version" = "$allowed_version" ] && return 0
+    done
+    return 1
+}
+
 detect_os() {
     local os_release="${REDHAVI_ROOT}/etc/os-release"
 
@@ -83,9 +97,12 @@ detect_os() {
     . "$os_release"
     OS="${ID:-unknown}"
     OS_VERSION_ID="${VERSION_ID:-unknown}"
-    if [ -n "$REDHAVI_REQUIRED_VERSION_ID" ] \
-        && { [ "$OS" != "ubuntu" ] || [ "$OS_VERSION_ID" != "$REDHAVI_REQUIRED_VERSION_ID" ]; }; then
-        fatal "This checker requires Ubuntu ${REDHAVI_REQUIRED_VERSION_ID}; detected ${PRETTY_NAME:-unknown}."
+    if [ -n "$REDHAVI_REQUIRED_OS_ID" ] && [ "$OS" != "$REDHAVI_REQUIRED_OS_ID" ]; then
+        fatal "This checker requires ${REDHAVI_OS_LABEL}; detected ${PRETTY_NAME:-unknown}."
+    fi
+    if [ -n "$REDHAVI_REQUIRED_VERSION_IDS" ] \
+        && ! os_version_is_allowed "$OS_VERSION_ID"; then
+        fatal "This checker requires ${REDHAVI_OS_LABEL} ${REDHAVI_REQUIRED_VERSION_IDS// / or }; detected ${PRETTY_NAME:-unknown}."
     fi
 }
 
@@ -130,7 +147,7 @@ validate_state_if_required() {
 
     if [ -z "$require_state" ]; then
         case "$OS" in
-            ubuntu) require_state=1 ;;
+            ubuntu|debian) require_state=1 ;;
             *) require_state=0 ;;
         esac
     fi
@@ -152,7 +169,7 @@ validate_state_if_required() {
     state_field_is 'status=ready' \
         || fatal "The deployment is incomplete; no points will be awarded."
 
-    if [ "$OS" = "ubuntu" ]; then
+    if [ "$OS" = "ubuntu" ] || [ "$OS" = "debian" ]; then
         state_field_is "expected_checks=${UBUNTU_EXPECTED_CHECKS}" \
             || fatal "The marker does not declare ${UBUNTU_EXPECTED_CHECKS} checks."
     fi
@@ -475,7 +492,8 @@ run_package_checks() {
 expected_checks_for_os() {
     case "$OS" in
         ubuntu) printf '%s\n' "$UBUNTU_EXPECTED_CHECKS" ;;
-        debian|kali) printf '9\n' ;;
+        debian) printf '%s\n' "$UBUNTU_EXPECTED_CHECKS" ;;
+        kali) printf '9\n' ;;
         centos|rhel|ol|fedora) printf '11\n' ;;
         arch) printf '8\n' ;;
         *) return 1 ;;

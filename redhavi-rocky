@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Punto de entrada para el escenario Redhavi en Rocky Linux.
+# Este archivo no es autónomo: necesita redhavi-fedora en el mismo directorio.
+# Por seguridad, solo muestra un dry-run salvo que se use --apply.
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+IMPLEMENTATION="$SCRIPT_DIR/redhavi-fedora"
+DETECTED_OS="unknown"
+SHOW_HELP=0
+
+for argument in "$@"; do
+    case "$argument" in
+        -h|--help)
+            SHOW_HELP=1
+            ;;
+    esac
+done
+
+if [ "$SHOW_HELP" -eq 1 ]; then
+    cat <<'EOF'
+Uso: redhavi-rocky [--apply] [--yes]
+
+Prepara el escenario de práctica Redhavi en Rocky Linux.
+
+Requisito:
+  redhavi-rocky no es autónomo. El archivo redhavi-fedora debe estar en el
+  mismo directorio que redhavi-rocky.
+
+Opciones:
+  --apply    Aplica los cambios. Sin esta opción solo muestra una simulación.
+  --yes      Omite la confirmación interactiva al usar --apply.
+  -h, --help Muestra esta ayuda.
+
+Ejemplo:
+  sudo ./redhavi-rocky --apply
+
+Advertencia:
+  Úsalo únicamente en una máquina virtual autorizada, aislada y desechable.
+EOF
+    exit 0
+fi
+
+if [ -n "${OS_OVERRIDE:-}" ]; then
+    DETECTED_OS="$OS_OVERRIDE"
+elif [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    DETECTED_OS="${ID:-unknown}"
+fi
+
+if [ "$DETECTED_OS" != "rocky" ]; then
+    printf '[ERROR] redhavi-rocky solo funciona en Rocky Linux. Sistema detectado: %s\n' "$DETECTED_OS" >&2
+    exit 1
+fi
+
+if [ ! -r "$IMPLEMENTATION" ]; then
+    printf '[ERROR] Falta el archivo requerido: %s\n' "$IMPLEMENTATION" >&2
+    printf '[AYUDA] redhavi-rocky no es autónomo; necesita redhavi-fedora en el mismo directorio.\n' >&2
+    printf '[AYUDA] Copia ambos archivos juntos y vuelve a ejecutar el comando. Por ejemplo:\n' >&2
+    printf '        cp redhavi-fedora %s/\n' "$SCRIPT_DIR" >&2
+    printf '        bash %s/redhavi-rocky --apply\n' "$SCRIPT_DIR" >&2
+    exit 1
+fi
+
+printf '[INFO] Dependencia encontrada: %s\n' "$IMPLEMENTATION"
+printf '[INFO] Sin --apply solo se muestra una simulación y no se instala nada.\n'
+
+export OS_OVERRIDE="rocky"
+export REDHAVI_SCRIPT_NAME="redhavi-rocky"
+
+# shellcheck source=redhavi-fedora
+source "$IMPLEMENTATION"

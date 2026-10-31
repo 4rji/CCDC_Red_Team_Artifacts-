@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+    printf '[ERROR] Ejecuta este script como root.\n' >&2
+    exit 1
+fi
+
+source /etc/os-release
+if [[ ${ID:-} != "rocky" || ${VERSION_ID%%.*} != "9" ]]; then
+    printf '[ERROR] Este instalador requiere Rocky Linux 9.\n' >&2
+    exit 1
+fi
+
+printf '[*] Instalando Apache y PHP...\n'
+dnf install -y httpd php
+systemctl enable --now httpd
+
+# Misconfiguración intencional para CCDC: el equipo debe configurar el firewall.
+systemctl disable --now firewalld 2>/dev/null || true
+
+cat > /etc/php.d/99-ecom-ccdc.ini <<'INI'
+; MISCONFIGURACIONES INTENCIONALES PARA PRACTICA CCDC
+expose_php = On
+display_errors = On
+display_startup_errors = On
+log_errors = Off
+session.cookie_httponly = 0
+session.cookie_secure = 0
+INI
+
+install -d -m 0755 /var/www/html/store
+
+cat > /var/www/html/store/index.php <<'PHP'
+<?php
+declare(strict_types=1);
+session_start();
+
+$products = [
+    1 => ['name' => 'Teclado', 'price' => 29.99],
+    2 => ['name' => 'Ratón',   'price' => 14.99],
+    3 => ['name' => 'Monitor', 'price' => 129.99],
+];
+
+if (isset($_POST['product']) && isset($products[(int) $_POST['product']])) {
+    $_SESSION['cart'][] = (int) $_POST['product'];
+}
+if (isset($_POST['clear'])) {
+    $_SESSION['cart'] = [];
+}
+
+$cart = $_SESSION['cart'] ?? [];
+$total = 0.0;
+foreach ($cart as $id) {
+    $total += $products[$id]['price'];
+}
+?>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rocky Store</title>
+  <style>
+    body{font:16px system-ui;margin:0;background:#f4f6f8;color:#17202a}
+    main{max-width:850px;margin:40px auto;padding:24px}
+    h1{color:#0b6b3a}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}
+    article,aside{background:#fff;padding:20px;border-radius:10px;box-shadow:0 2px 10px #0001}
+    button{background:#0b6b3a;color:#fff;border:0;padding:10px 14px;border-radius:6px;cursor:pointer}
+    aside{margin-top:20px}small{color:#68737d}
+  </style>
+</head>
+<body><main>
+  <h1>Rocky Store</h1>
+  <p><small>Escaparate de prueba · no procesa pagos reales</small></p>
+  <section class="grid">
+    <?php foreach ($products as $id => $product): ?>
+      <article>
+        <h2><?= htmlspecialchars($product['name']) ?></h2>
+        <p>$<?= number_format($product['price'], 2) ?></p>
+        <form method="post">
+          <input type="hidden" name="product" value="<?= $id ?>">
+          <button>Añadir al carrito</button>
+        </form>
+      </article>
+    <?php endforeach; ?>
+  </section>
+  <aside>
+    <strong>Carrito:</strong> <?= count($cart) ?> producto(s) · Total $<?= number_format($total, 2) ?>
+    <form method="post" style="margin-top:12px"><button name="clear">Vaciar carrito</button></form>
+  </aside>
+</main></body></html>
+PHP
+
+chown -R root:apache /var/www/html/store
+find /var/www/html/store -type d -exec chmod 0755 {} +
+find /var/www/html/store -type f -exec chmod 0644 {} +
+restorecon -RF /var/www/html/store
+apachectl configtest
+systemctl reload httpd
+
+ip_address=$(hostname -I 2>/dev/null | awk '{print $1}')
+printf '\n[+] Rocky Store instalada.\n'
+printf '    Local:  http://127.0.0.1/store/\n'
+printf '    Red:    http://%s/store/\n' "${ip_address:-IP_DEL_SERVIDOR}"
+printf '    Puerto: 80/tcp\n'
+printf '    CCDC:   firewalld está deshabilitado y PHP está mal configurado a propósito.\n'

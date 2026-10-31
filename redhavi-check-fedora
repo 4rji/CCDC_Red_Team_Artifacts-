@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# Verifies that the vulnerable configurations planted by redhavi-fedora have
-# been removed. This script does not modify the system.
+# Verifies that the vulnerable configurations planted by the Fedora-family
+# Redhavi seeder have been removed. This script does not modify the system.
 
 TOTAL_CHECKS=0
 PASSED_CHECKS=0
-FEDORA_ID="unknown"
+OS_ID="unknown"
 EXPECTED_CHECKS=17
+CHECKER_NAME="${REDHAVI_CHECKER_NAME:-redhavi-check-fedora}"
+SCENARIO_NAME="${REDHAVI_SCENARIO_NAME:-redhavi-fedora}"
+PLATFORM_NAME="${REDHAVI_PLATFORM_NAME:-Fedora}"
 ROOT_KEY_BLOB="${ROOT_KEY_BLOB:-AAAAC3NzaC1lZDI1NTE5AAAAILvd2Ok5Jk5HN1XFacHqgh+c2PhAr26Z8FZ130iaVDUB}"
 CANARY_SERVICE="redhavi-canary.service"
 CANARY_TIMER="redhavi-canary.timer"
@@ -27,11 +30,11 @@ else
 fi
 
 usage() {
-    cat <<'EOF'
-Usage: sudo redhavi-check-fedora
+    cat <<EOF
+Usage: sudo ${CHECKER_NAME}
 
-Checks a Fedora system for vulnerable configurations planted by
-redhavi-fedora. It is read-only and never cleans or modifies files.
+Checks a ${PLATFORM_NAME} system for vulnerable configurations planted by
+${SCENARIO_NAME}. It is read-only and never cleans or modifies files.
 
 Options:
   -h, --help    Show this help message.
@@ -84,21 +87,27 @@ parse_args() {
     done
 }
 
-require_fedora() {
+require_supported_os() {
     if [ -n "${OS_OVERRIDE:-}" ]; then
-        FEDORA_ID="$OS_OVERRIDE"
+        OS_ID="$OS_OVERRIDE"
     elif [ -r /etc/os-release ]; then
         # shellcheck disable=SC1091
         . /etc/os-release
-        FEDORA_ID="${ID:-unknown}"
+        OS_ID="${ID:-unknown}"
     fi
 
-    [ "$FEDORA_ID" = "fedora" ] || die "This checker only supports Fedora. Detected: $FEDORA_ID"
+    case "$OS_ID" in
+        fedora|rocky)
+            ;;
+        *)
+            die "This checker only supports Fedora and Rocky Linux. Detected: $OS_ID"
+            ;;
+    esac
     command -v rpm >/dev/null 2>&1 || die "rpm was not found."
 }
 
 require_root() {
-    [ "$(id -u)" -eq 0 ] || die "Run as root: sudo redhavi-check-fedora"
+    [ "$(id -u)" -eq 0 ] || die "Run as root: sudo $CHECKER_NAME"
 }
 
 user_has_admin_group() {
@@ -173,7 +182,7 @@ check_cron() {
     if grep -Fq "$suspicious" <<<"$cron_content"; then
         bad "Root's crontab still contains the download from 10.5.8.11."
     else
-        ok "The redhavi-fedora cron job was not found."
+        ok "The $SCENARIO_NAME cron job was not found."
     fi
 }
 
@@ -262,9 +271,9 @@ check_root_ssh() {
     elif [ ! -f "$auth_file" ] || [ ! -r "$auth_file" ]; then
         bad "$auth_file could not be inspected."
     elif key_file_has_lab_key "$auth_file"; then
-        bad "$auth_file still contains the redhavi-fedora SSH key."
+        bad "$auth_file still contains the $SCENARIO_NAME SSH key."
     else
-        ok "The redhavi-fedora SSH key was removed; other keys are not penalized."
+        ok "The $SCENARIO_NAME SSH key was removed; other keys are not penalized."
     fi
 
     if [ -d /root/.ssh ]; then
@@ -326,7 +335,7 @@ check_web() {
 
     section "Web and PHP content"
 
-    # redhavi-fedora only applies chattr +i to the first file.
+    # The Fedora-family seeder only applies chattr +i to the first file.
     check_immutable "${web_files[0]}"
     report_immutable_info "${web_files[1]}"
     report_immutable_info "${web_files[2]}"
@@ -389,7 +398,7 @@ print_summary() {
     printf '%sScore:%s       %d%%\n' "$YELLOW" "$RESET" "$percent"
 
     if [ "$failed" -eq 0 ]; then
-        printf '\n%sThe system is clean according to the redhavi-fedora checks.%s\n' "$GREEN" "$RESET"
+        printf '\n%sThe system is clean according to the %s checks.%s\n' "$GREEN" "$SCENARIO_NAME" "$RESET"
         return 0
     fi
 
@@ -399,11 +408,11 @@ print_summary() {
 
 main() {
     parse_args "$@"
-    require_fedora
+    require_supported_os
     require_root
 
-    printf '\n%s=== Fedora CCDC cleanup verification ===%s\n' "$CYAN" "$RESET"
-    printf '%sDetected system:%s %s\n' "$YELLOW" "$RESET" "$FEDORA_ID"
+    printf '\n%s=== %s CCDC cleanup verification ===%s\n' "$CYAN" "$PLATFORM_NAME" "$RESET"
+    printf '%sDetected system:%s %s\n' "$YELLOW" "$RESET" "$OS_ID"
 
     check_users
     check_cron
