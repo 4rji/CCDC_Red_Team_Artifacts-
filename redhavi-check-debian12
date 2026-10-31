@@ -13,7 +13,7 @@ fi
 
 export REDHAVI_SCENARIO_NAME="redhavi-debian12"
 export REDHAVI_SCENARIO_VERSION="1"
-export REDHAVI_EXPECTED_CHECKS="9"
+export REDHAVI_EXPECTED_CHECKS="11"
 export REDHAVI_REQUIRED_OS_ID="debian"
 export REDHAVI_OS_LABEL="Debian"
 export REDHAVI_REQUIRED_VERSION_ID="12"
@@ -23,4 +23,40 @@ export REDHAVI_CHECK_CANARY="0"
 
 # shellcheck source=redhavi-check
 . "$IMPLEMENTATION"
-main "$@"
+
+SPLUNK_HOME="${SPLUNK_HOME:-/opt/splunk}"
+SPLUNK_POST_APP="${SPLUNK_HOME}/etc/apps/ccdc_post"
+
+run_profile_checks() {
+    local apps_dir="${SPLUNK_HOME}/etc/apps"
+    local owner
+    local mode
+    local permissions
+
+    section "Splunk application security"
+    subtitle "Application directory ownership and permissions"
+    if [ ! -d "$apps_dir" ]; then
+        check_error splunk_app_perms "Splunk apps directory is missing: $apps_dir"
+    elif ! owner="$(stat -c '%U:%G' "$apps_dir" 2>/dev/null)" \
+        || ! mode="$(stat -c '%a' "$apps_dir" 2>/dev/null)"; then
+        check_error splunk_app_perms "could not inspect $apps_dir"
+    else
+        permissions=$((8#$mode))
+        if [ "$owner" = "splunk:splunk" ] && [ $((permissions & 0022)) -eq 0 ]; then
+            ok splunk_app_perms "$apps_dir belongs to splunk:splunk and is not group/world-writable"
+        else
+            bad splunk_app_perms "$apps_dir has owner $owner and mode $mode; expected splunk:splunk without group/world write"
+        fi
+    fi
+
+    subtitle "Scripted-input practice application"
+    if [ -e "$SPLUNK_POST_APP" ]; then
+        bad splunk_post_app "$SPLUNK_POST_APP is still installed"
+    else
+        ok splunk_post_app "ccdc_post application removed"
+    fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

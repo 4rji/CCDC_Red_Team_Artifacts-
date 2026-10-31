@@ -571,6 +571,9 @@ verify_seeded() {
     verify_expect "valid key reference" key_file_has_fingerprint "$KEY_REF"
     verify_expect "exact SSH key seeded" key_file_has_blob "$AUTH_FILE" "$key_blob"
     verify_expect "immutable authorized_keys" is_immutable "$AUTH_FILE"
+    if declare -F verify_profile_artifacts >/dev/null 2>&1; then
+        verify_profile_artifacts
+    fi
 
     [ "$VERIFY_FAILURES" -eq 0 ]
 }
@@ -646,6 +649,11 @@ main() {
 
     CURRENT_STEP="users"
     setup_users
+
+    CURRENT_STEP="profile-specific artifacts"
+    if declare -F setup_profile_artifacts >/dev/null 2>&1; then
+        setup_profile_artifacts
+    fi
 
     CURRENT_STEP="SSH key"
     setup_root_ssh_key

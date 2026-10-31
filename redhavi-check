@@ -116,7 +116,7 @@ require_command() {
 require_commands() {
     local command_name
 
-    for command_name in awk crontab getent grep id lsattr passwd; do
+    for command_name in awk crontab getent grep id lsattr passwd stat; do
         require_command "$command_name"
     done
     if [ "$REDHAVI_CHECK_CANARY" = "1" ]; then
@@ -555,6 +555,9 @@ main() {
 
     check_webshells
     run_package_checks
+    if declare -F run_profile_checks >/dev/null 2>&1; then
+        run_profile_checks
+    fi
     print_summary_and_exit
 }
 

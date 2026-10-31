@@ -139,6 +139,11 @@ Keep `redhavi-debian12` beside `redhavi`, and keep
 the Debian 12 Splunk practice VM. Splunk may already be installed; the script
 does not reinstall it. As an intentional CCDC finding, it changes an existing
 `splunk` account into an interactive sudo user and assigns the lab password.
+It also makes `/opt/splunk/etc/apps` root-owned and world-writable, then installs
+a benign `ccdc_post` app containing a `script://` input. The exercise demonstrates
+how unsafe app permissions can become command execution without deploying a
+reverse shell. The checker requires restoring `splunk:splunk`, removing group
+and world write access, and deleting the practice app.
 
 ```bash
 sudo ./redhavi-debian12

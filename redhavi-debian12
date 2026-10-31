@@ -15,7 +15,7 @@ fi
 export REDHAVI_PROGRAM_NAME="redhavi-debian12"
 export REDHAVI_SCENARIO_NAME="redhavi-debian12"
 export REDHAVI_SCENARIO_VERSION="1"
-export REDHAVI_EXPECTED_CHECKS="9"
+export REDHAVI_EXPECTED_CHECKS="11"
 export REDHAVI_REQUIRED_OS_ID="debian"
 export REDHAVI_OS_LABEL="Debian"
 export REDHAVI_REQUIRED_VERSION_ID="12"
@@ -26,6 +26,59 @@ export REDHAVI_INSTALL_TFTP="1"
 # shellcheck source=redhavi
 . "$IMPLEMENTATION"
 
+SPLUNK_HOME="${SPLUNK_HOME:-/opt/splunk}"
+SPLUNK_POST_APP="${SPLUNK_HOME}/etc/apps/ccdc_post"
+
+setup_profile_artifacts() {
+    local apps_dir="${SPLUNK_HOME}/etc/apps"
+
+    [ -d "$apps_dir" ] \
+        || die "Splunk does not appear to be installed at ${SPLUNK_HOME}. Missing: ${apps_dir}"
+    id splunk >/dev/null 2>&1 \
+        || die "The Splunk service account does not exist: splunk"
+
+    log "Planting the intentional Splunk app-permission exercise..."
+    chown root:splunk "$apps_dir"
+    chmod 0777 "$apps_dir"
+
+    mkdir -p "${SPLUNK_POST_APP}/local" "${SPLUNK_POST_APP}/bin"
+    cat > "${SPLUNK_POST_APP}/local/inputs.conf" <<'EOF'
+[script://./bin/post.sh]
+disabled = false
+interval = 60
+index = main
+sourcetype = ccdc:post
+EOF
+    cat > "${SPLUNK_POST_APP}/bin/post.sh" <<'EOF'
+#!/bin/sh
+# Benign CCDC artifact: demonstrates that a Splunk scripted input executes code.
+printf '{"event":"ccdc_post heartbeat","source":"scripted_input"}\n'
+EOF
+    chown -R root:root "$SPLUNK_POST_APP"
+    chmod 0755 "$SPLUNK_POST_APP" "$SPLUNK_POST_APP/bin" "$SPLUNK_POST_APP/bin/post.sh"
+    chmod 0755 "$SPLUNK_POST_APP/local"
+    chmod 0644 "$SPLUNK_POST_APP/local/inputs.conf"
+    warn "Intentional finding: ${apps_dir} is root-owned and world-writable."
+    warn "Intentional finding: ${SPLUNK_POST_APP} contains a benign script:// input."
+    warn "Splunk was not restarted; the input loads on the next normal restart or app reload."
+}
+
+verify_profile_artifacts() {
+    local apps_dir="${SPLUNK_HOME}/etc/apps"
+    local owner
+    local mode
+
+    owner="$(stat -c '%U:%G' "$apps_dir" 2>/dev/null || true)"
+    mode="$(stat -c '%a' "$apps_dir" 2>/dev/null || true)"
+    verify_expect "insecure Splunk apps directory (${owner} mode ${mode})" \
+        test "$owner" = "root:splunk" -a "$mode" = "777"
+    verify_expect "ccdc_post scripted-input app" \
+        grep -Fq '[script://./bin/post.sh]' "${SPLUNK_POST_APP}/local/inputs.conf"
+}
+
 printf '[redhavi-debian12][WARN] This lab intentionally makes the existing splunk account interactive, adds it to sudo, and sets a practice password.\n' >&2
+printf '[redhavi-debian12][WARN] It also plants insecure Splunk app permissions and a benign scripted-input exercise.\n' >&2
 printf '[redhavi-debian12][WARN] Use only on the authorized disposable Debian Splunk training VM.\n' >&2
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

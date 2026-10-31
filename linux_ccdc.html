@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CCDC preparation guide for Rocky Linux e-commerce and Ubuntu email services.">
+  <meta name="description" content="CCDC preparation guide for Rocky Linux e-commerce, Ubuntu email, and Debian Splunk services.">
   <title>Linux CCDC Lab Guide</title>
   <style>
     :root {
@@ -16,6 +16,7 @@
       --line: #2a3a47;
       --rocky: #64d98b;
       --ubuntu: #ff8d62;
+      --debian: #72b7ff;
       --warning: #ffd166;
     }
 
@@ -27,6 +28,7 @@
       background:
         radial-gradient(circle at 10% 0%, rgba(100, 217, 139, .12), transparent 30rem),
         radial-gradient(circle at 90% 15%, rgba(255, 141, 98, .12), transparent 32rem),
+        radial-gradient(circle at 50% 100%, rgba(114, 183, 255, .1), transparent 34rem),
         var(--bg);
       color: var(--text);
       font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -120,6 +122,7 @@
 
     .rocky .distro, .rocky h3 { color: var(--rocky); }
     .ubuntu .distro, .ubuntu h3 { color: var(--ubuntu); }
+    .debian .distro, .debian h3 { color: var(--debian); }
 
     .lab-body {
       display: grid;
@@ -218,10 +221,11 @@
   <header class="shell">
     <p class="eyebrow">Tomorrow's Labs</p>
     <h1>Linux CCDC Field Guide</h1>
-    <p class="intro">Two service-focused exercises. Learn how each stack works, secure it without destroying availability, and be ready to explain every change.</p>
+    <p class="intro">Three service-focused exercises. Learn how each stack works, secure it without destroying availability, and be ready to explain every change.</p>
     <nav aria-label="Lab navigation">
       <a href="#ecommerce">Rocky Linux 9 · E-Commerce</a>
       <a href="#email">Ubuntu 22.04 · Email</a>
+      <a href="#splunk">Debian 12 · Splunk</a>
     </nav>
   </header>
 
@@ -378,6 +382,85 @@
         <article class="block wide objective">
           <h3>Practical objective</h3>
           <p>Send an email with an attachment from one user to another, access it from a different machine, and demonstrate where it is stored under the recipient's <code>Maildir</code>.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="lab debian" id="splunk">
+      <div class="lab-head">
+        <div>
+          <h2>Splunk Monitoring</h2>
+          <p>Protect the monitoring platform while preserving log ingestion, searches, dashboards, forwarder communication, and evidence needed by the team.</p>
+        </div>
+        <span class="distro">Debian 12 · Splunk 10.0.2</span>
+      </div>
+
+      <div class="lab-body">
+        <article class="block">
+          <h3>Know the stack</h3>
+          <ul>
+            <li><strong>Splunk Web:</strong> provides searches, dashboards, and administration.</li>
+            <li><strong>splunkd:</strong> runs indexing, searches, REST management, and inputs.</li>
+            <li><strong>Forwarders:</strong> send approved logs from other systems.</li>
+            <li><strong>Indexes:</strong> store searchable event data.</li>
+            <li><strong>Apps:</strong> package configuration, scripts, commands, and dashboards.</li>
+          </ul>
+        </article>
+
+        <article class="block">
+          <h3>Review these paths</h3>
+          <ul class="files">
+            <li><code>/opt/splunk/etc/system/local/</code></li>
+            <li><code>/opt/splunk/etc/apps/*/local/</code></li>
+            <li><code>/opt/splunk/etc/apps/*/bin/</code></li>
+            <li><code>/opt/splunk/etc/users/</code></li>
+            <li><code>/opt/splunk/etc/auth/</code></li>
+            <li><code>/opt/splunk/var/log/splunk/</code></li>
+          </ul>
+        </article>
+
+        <article class="block wide">
+          <h3>Two priority tips</h3>
+          <div class="tips">
+            <div class="tip">
+              <strong>1. Trace every forwarder and receiver</strong>
+              <p>Inventory approved forwarders, deployment clients, destinations, and receiving ports. Investigate unknown peers or changes to <code>outputs.conf</code>, <code>inputs.conf</code>, and <code>deploymentclient.conf</code>.</p>
+            </div>
+            <div class="tip">
+              <strong>2. Audit every path that can execute code</strong>
+              <p>Inspect <code>script://</code> inputs, alert actions, custom commands, modular inputs, and app <code>bin/</code> directories. The lab plants <code>ccdc_post</code> as a benign example of this execution path.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="block">
+          <h3>CCDC checks</h3>
+          <ul>
+            <li>Unknown Splunk users, roles, tokens, sessions, or admin changes.</li>
+            <li>Unauthorized forwarders, deployment servers, or output destinations.</li>
+            <li>Malicious scripted inputs, alert actions, commands, or app binaries.</li>
+            <li><code>/opt/splunk/etc/apps</code> changed to <code>root:splunk</code> mode <code>0777</code>.</li>
+            <li>The practice app <code>/opt/splunk/etc/apps/ccdc_post/</code>.</li>
+            <li>Unexpected ports such as 8000, 8089, or 9997.</li>
+            <li>System users, sudo access, SSH keys, cron jobs, and RedHavi persistence.</li>
+          </ul>
+        </article>
+
+        <article class="block">
+          <h3>Useful commands</h3>
+          <div class="commands">
+            <code>/opt/splunk/bin/splunk status</code>
+            <code>/opt/splunk/bin/splunk list forward-server</code>
+            <code>/opt/splunk/bin/splunk btool inputs list --debug</code>
+            <code>/opt/splunk/bin/splunk btool outputs list --debug</code>
+            <code>ss -lntp</code>
+            <code>journalctl -u Splunkd</code>
+          </div>
+        </article>
+
+        <article class="block wide objective">
+          <h3>Practical objective</h3>
+          <p>Identify every log source and forwarder, locate the <code>ccdc_post</code> scripted input, preserve evidence, and remove the practice app. Restore <code>/opt/splunk/etc/apps</code> to <code>splunk:splunk</code> mode <code>0755</code>, then prove ingestion, searches, and dashboards still work.</p>
         </article>
       </div>
     </section>
