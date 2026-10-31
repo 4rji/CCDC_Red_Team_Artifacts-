@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Minimal Debian installations and some `su` environments omit sbin paths,
+# even for root. Account-management commands such as useradd and chpasswd live
+# there, so use a deterministic administrative PATH.
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+export PATH
+
 # Redhavi: shared CCDC practice scenario for Debian-family systems.
 PROGRAM_NAME="${REDHAVI_PROGRAM_NAME:-redhavi}"
 SCENARIO_NAME="${REDHAVI_SCENARIO_NAME:-redhavi}"
@@ -342,7 +348,10 @@ setup_canary_timer() {
     local service_content
     local timer_content
 
-    [ "$REDHAVI_ENABLE_CANARY" = "1" ] || return
+    if [ "$REDHAVI_ENABLE_CANARY" != "1" ]; then
+        log "Monitor canary is disabled for this profile; skipping timer setup."
+        return 0
+    fi
     log "Configuring a monitor check-in every ${CANARY_INTERVAL} minutes..."
 
     service_content="[Unit]

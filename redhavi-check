@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+export PATH
+
 LC_ALL=C
 export LC_ALL
 
